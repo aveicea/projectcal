@@ -1,8 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, use } from "react";
-import CalendarWidget from "@/components/CalendarWidget";
+import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { DEFAULT_BAR_COLORS } from "@/lib/calendarUtils";
+
+const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
+  ssr: false,
+  loading: () => null,
+});
 
 interface Config {
   id: string;
@@ -26,15 +31,14 @@ interface Config {
   updatedAt: string;
 }
 
-export default function WidgetPage({ params }: { params: Promise<{ cfg: string }> }) {
-  const { cfg } = use(params);
+export default function WidgetPage({ params }: { params: { cfg: string } }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [barColors, setBarColors] = useState<string[]>(DEFAULT_BAR_COLORS);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     try {
-      let base64 = cfg.replace(/-/g, "+").replace(/_/g, "/");
+      let base64 = params.cfg.replace(/-/g, "+").replace(/_/g, "/");
       while (base64.length % 4) base64 += "=";
       const raw = atob(base64);
       const bytes = new Uint8Array(raw.length);
@@ -43,7 +47,7 @@ export default function WidgetPage({ params }: { params: Promise<{ cfg: string }
 
       if (Array.isArray(json.barColors)) setBarColors(json.barColors);
 
-      const parsed: Config = {
+      setConfig({
         id: "embedded",
         notionConfig: {
           apiKey: json.token,
@@ -52,9 +56,9 @@ export default function WidgetPage({ params }: { params: Promise<{ cfg: string }
           titleProperty: json.titleProp,
         },
         theme: {
-          primaryColor: json.primaryColor,
-          backgroundColor: json.backgroundColor,
-          backgroundOpacity: json.backgroundOpacity,
+          primaryColor: json.primaryColor ?? "#E8A8C0",
+          backgroundColor: json.backgroundColor ?? "#FFFFFF",
+          backgroundOpacity: json.backgroundOpacity ?? 100,
           fontFamily: json.fontFamily ?? "Pretendard",
           barColors: json.barColors ?? DEFAULT_BAR_COLORS,
           labelColor: json.labelColor ?? "#444444",
@@ -63,29 +67,30 @@ export default function WidgetPage({ params }: { params: Promise<{ cfg: string }
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      };
-      setConfig(parsed);
+      });
     } catch (e) {
       console.error("Config decode error:", e);
       setError(true);
     }
-  }, [cfg]);
+  }, [params.cfg]);
 
-  if (error || !config) {
+  if (error) {
     return (
       <>
         <style>{`html,body{background:transparent!important;margin:0;padding:0}`}</style>
-        <div style={{ width: "100%", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", padding: "2rem" }}>
-          {error ? (
-            <div style={{ textAlign: "center", color: "#e53e3e" }}>
-              <h2>위젯 설정 오류</h2>
-              <p>URL 파라미터가 올바르지 않습니다.</p>
-            </div>
-          ) : null}
+        <div style={{ width: "100%", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", color: "#e53e3e" }}>
+            <h2>위젯 설정 오류</h2>
+            <p>URL 파라미터가 올바르지 않습니다.</p>
+          </div>
         </div>
       </>
     );
   }
+
+  if (!config) return (
+    <style>{`html,body{background:transparent!important;margin:0;padding:0}`}</style>
+  );
 
   const darkMode = config.theme.darkMode;
 
@@ -95,15 +100,12 @@ export default function WidgetPage({ params }: { params: Promise<{ cfg: string }
         html, body {
           background: ${darkMode ? "#191919" : "transparent"} !important;
           background-color: ${darkMode ? "#191919" : "transparent"} !important;
-          margin: 0 !important;
-          padding: 0 !important;
+          margin: 0 !important; padding: 0 !important;
         }
         body {
           padding-top: 20px !important;
-          display: flex;
-          justify-content: center;
-          align-items: flex-start;
-          min-height: 100vh;
+          display: flex; justify-content: center;
+          align-items: flex-start; min-height: 100vh;
         }
       `}</style>
       <CalendarWidget
