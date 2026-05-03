@@ -1,0 +1,586 @@
+"use client";
+
+import React, { useState } from "react";
+import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
+import CalendarWidget from "@/components/CalendarWidget";
+import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
+
+const THEMES = [
+  { name: "파스텔톤", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
+  { name: "핑크",    colors: { background: "#FFF5F8", primary: "#F19CB6", barColors: ["#FFB3BA","#FFDBE7","#FFD1DC","#F8C8DC","#FF9EC1","#FFC4D6","#FF85A2","#FFE4ED"] } },
+  { name: "블랙",    colors: { background: "#1E1E1E", primary: "#4A4A4A", barColors: ["#6B7280","#9CA3AF","#D1D5DB","#E5E7EB","#F3F4F6","#8B5CF6","#EC4899","#F97316"] } },
+  { name: "화이트",  colors: { background: "#FFFFFF", primary: "#2D2D2D", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
+  { name: "보라",    colors: { background: "#F8F5FF", primary: "#B97FE7", barColors: ["#E2D1F0","#D4B8F0","#C9A0FF","#B388FF","#E8C8FF","#F0D0FF","#D1B3FF","#C7A3FF"] } },
+  { name: "그린",    colors: { background: "#F5FBF7", primary: "#66C497", barColors: ["#C6EBC5","#B5EAD7","#A8E6CF","#98D8C8","#88D8B0","#B4F0A7","#C1F0C1","#D0F0C0"] } },
+  { name: "블루",    colors: { background: "#F5FAFF", primary: "#5FA3EE", barColors: ["#BAE1FF","#A0C4FF","#BDB2FF","#9BF6FF","#CAF0F8","#ADE8F4","#90E0EF","#48CAE4"] } },
+  { name: "노랑",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
+];
+
+interface Settings {
+  databaseId: string;
+  apiKey: string;
+  dateProperty: string;
+  titleProperty: string;
+  primaryColor: string;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  fontFamily: string;
+  barColors: string[];
+  labelColor: string;
+  multiRow: boolean;
+  darkMode: boolean;
+}
+
+function makePreviewProjects(multiRow: boolean): Project[] {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const d = (day: number) => `${y}-${pad(m + 1)}-${pad(Math.min(day, new Date(y, m + 1, 0).getDate()))}`;
+  const base: Project[] = [
+    { id: "p1", title: "Website Redesign", startDate: d(1),  endDate: d(4),  pageUrl: "#" },
+    { id: "p2", title: "Mobile App MVP",   startDate: d(6),  endDate: d(10), pageUrl: "#" },
+    { id: "p3", title: "QA Testing",       startDate: d(12), endDate: d(14), pageUrl: "#" },
+    { id: "p4", title: "Final Launch",     startDate: d(17), endDate: d(22), pageUrl: "#" },
+    { id: "p5", title: "Design Polish",    startDate: d(21), endDate: d(24), pageUrl: "#" },
+  ];
+  if (multiRow) {
+    base.push(
+      { id: "p6", title: "Code Review", startDate: d(6),  endDate: d(9),  pageUrl: "#" },
+      { id: "p7", title: "Bug Fixes",   startDate: d(17), endDate: d(20), pageUrl: "#" }
+    );
+  }
+  return base;
+}
+
+export default function OnboardingPage() {
+  const [step, setStep] = useState(1);
+  const [generating, setGenerating] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
+  const [selectedTheme, setSelectedTheme] = useState("파스텔톤");
+  const [generatedUrl, setGeneratedUrl] = useState("");
+
+  const [settings, setSettings] = useState<Settings>({
+    databaseId: "",
+    apiKey: "",
+    dateProperty: "날짜",
+    titleProperty: "제목",
+    primaryColor: "#B5E3F0",
+    backgroundColor: "#FFFCF9",
+    backgroundOpacity: 100,
+    fontFamily: "Pretendard",
+    barColors: [...DEFAULT_BAR_COLORS],
+    labelColor: "#444444",
+    multiRow: false,
+    darkMode: false,
+  });
+
+  const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+    setErrorMsg(null);
+  };
+
+  const handleLoadDatabases = async () => {
+    if (!settings.apiKey.trim()) { setErrorMsg("Notion API 키를 입력해주세요."); return; }
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/databases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: settings.apiKey }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error?.message || "데이터베이스를 불러오는데 실패했습니다.");
+      if (json.data?.length > 0) {
+        setDatabases(json.data);
+      } else {
+        setErrorMsg("연결된 데이터베이스가 없습니다. Notion에서 Integration을 데이터베이스에 연결해주세요.");
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectDatabase = async (dbId: string) => {
+    update("databaseId", dbId);
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/analyze-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: settings.apiKey, databaseId: dbId }),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSettings((prev) => ({
+          ...prev,
+          databaseId: dbId,
+          dateProperty: json.data.dateProperty || prev.dateProperty,
+          titleProperty: json.data.titleProperty || prev.titleProperty,
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+      setStep(2);
+    }
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setErrorMsg(null);
+    try {
+      const cfg = {
+        token: settings.apiKey,
+        dbId: settings.databaseId,
+        dateProp: settings.dateProperty,
+        titleProp: settings.titleProperty,
+        primaryColor: settings.primaryColor,
+        backgroundColor: settings.backgroundColor,
+        backgroundOpacity: settings.backgroundOpacity,
+        fontFamily: settings.fontFamily,
+        barColors: settings.barColors,
+        labelColor: settings.labelColor,
+        multiRow: settings.multiRow,
+        darkMode: settings.darkMode,
+      };
+      const encoded = btoa(
+        Array.from(new TextEncoder().encode(JSON.stringify(cfg)))
+          .map((b) => String.fromCharCode(b))
+          .join("")
+      ).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+      setGeneratedUrl(`${window.location.origin}/u/${encoded}`);
+      setStep(3);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("설정 생성 중 오류가 발생했습니다.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const previewTheme = {
+    primaryColor: settings.primaryColor,
+    backgroundColor: settings.backgroundColor,
+    backgroundOpacity: settings.backgroundOpacity,
+    barColors: settings.barColors,
+    labelColor: settings.labelColor,
+    multiRow: settings.multiRow,
+    darkMode: settings.darkMode,
+  };
+
+  return (
+    <>
+      <style>{`
+        @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+        @import url('https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css');
+
+        body {
+          margin: 0;
+          padding-bottom: 120px;
+          background-color: #FDF0F6;
+          background-image:
+            linear-gradient(rgba(232,168,192,0.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(232,168,192,0.1) 1px, transparent 1px);
+          background-size: 40px 40px;
+          font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+          color: #4A4A4A;
+        }
+
+        .pixel-window {
+          background: rgba(255,255,255,0.95);
+          border: 1px solid #E8A8C0;
+          border-radius: 16px;
+          box-shadow: 0 20px 60px -10px rgba(232,168,192,0.25);
+          max-width: 1100px;
+          margin: 3rem auto;
+          position: relative;
+          backdrop-filter: blur(10px);
+          overflow: hidden;
+        }
+
+        .title-bar {
+          background: white;
+          padding: 12px 20px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid #FFE4E1;
+          color: #E8A8C0;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+        }
+
+        .window-content { padding: 40px; min-height: 500px; }
+
+        .step-progress-bar { display: flex; margin-bottom: 40px; justify-content: center; gap: 12px; }
+
+        .step-pill {
+          padding: 8px 24px; border-radius: 50px; font-size: 13px; font-weight: 600;
+          color: #bbb; background: #f8f8f8; transition: all 0.3s ease;
+        }
+        .step-pill.active { background: #FFF0F5; color: #E8A8C0; box-shadow: 0 4px 12px rgba(232,168,192,0.2); }
+        .step-pill.completed { background: #E8A8C0; color: white; }
+
+        .soft-input, .soft-select {
+          width: 100%; padding: 16px; border: 1px solid #eee; border-radius: 12px;
+          background: #F9F9F9; font-family: 'Pretendard', sans-serif; font-size: 16px;
+          color: #444; outline: none; margin-bottom: 12px; transition: all 0.2s; box-sizing: border-box;
+        }
+        .soft-select {
+          cursor: pointer; appearance: none;
+          background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+          background-repeat: no-repeat; background-position: right 1rem center; background-size: 1em;
+        }
+        .soft-input:focus, .soft-select:focus {
+          background: white; border-color: #E8A8C0; box-shadow: 0 0 0 4px rgba(232,168,192,0.1);
+        }
+
+        .soft-btn {
+          background: #E8A8C0; color: white; border: none; padding: 14px 32px;
+          font-family: 'Pretendard', sans-serif; font-weight: 600; border-radius: 12px;
+          cursor: pointer; font-size: 15px; box-shadow: 0 4px 12px rgba(232,168,192,0.3);
+          transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .soft-btn:hover { transform: translateY(-2px); background: #E090A8; box-shadow: 0 6px 16px rgba(232,168,192,0.4); }
+        .soft-btn:disabled { background: #F0D0D8; cursor: not-allowed; box-shadow: none; transform: none; }
+        .soft-btn.secondary {
+          background: white; color: #666; border: 1px solid #eee; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .soft-btn.secondary:hover { background: #f9f9f9; border-color: #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+        .db-card {
+          border: 1px solid #f0f0f0; border-radius: 16px; background: white; padding: 24px;
+          cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 16px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+        }
+        .db-card:hover { border-color: #E8A8C0; transform: translateY(-4px); box-shadow: 0 10px 20px rgba(232,168,192,0.15); }
+
+        .theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .theme-item {
+          border: 1px solid #f0f0f0; border-radius: 12px; background: white; padding: 12px;
+          text-align: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .theme-item:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .theme-item.selected { border-color: #E8A8C0; background: #FFF5F8; box-shadow: 0 0 0 2px #E8A8C0; }
+
+        .color-dot {
+          width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.05);
+          display: inline-block; margin: 0 -3px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .section-title {
+          font-size: 16px; font-weight: 700; color: #333; margin-bottom: 16px;
+          display: flex; align-items: center; gap: 8px;
+        }
+
+        .color-picker-wrapper {
+          display: flex; align-items: center; justify-content: space-between; padding: 10px;
+          background: #fff; border: 1px solid #f0f0f0; border-radius: 10px; margin-bottom: 8px;
+        }
+        .color-input-circle {
+          width: 32px; height: 32px; padding: 0; border: none; border-radius: 50%;
+          overflow: hidden; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .range-slider {
+          width: 100%; height: 6px; border-radius: 5px; background: #eee; outline: none; -webkit-appearance: none;
+        }
+        .range-slider::-webkit-slider-thumb {
+          -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+          background: #E8A8C0; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .bar-colors-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+        .bar-color-item {
+          display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+          background: #fff; border: 1px solid #f0f0f0; border-radius: 8px;
+        }
+        .bar-color-input {
+          width: 24px; height: 24px; padding: 0; border: none; border-radius: 50%;
+          overflow: hidden; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .footer {
+          position: fixed; bottom: 0; left: 0; right: 0; text-align: center; padding: 20px;
+          color: #888; font-size: 13px; line-height: 1.8;
+          background: rgba(253,240,246,0.8); backdrop-filter: blur(10px); z-index: 100;
+        }
+        .footer a { color: #E8A8C0; text-decoration: none; font-weight: 600; }
+        .footer a:hover { color: #D88AA8; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}</style>
+
+      <div className="pixel-window">
+        {/* Title bar */}
+        <div className="title-bar">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Settings2 size={18} strokeWidth={2.5} />
+            <span>Y2K Project Calendar</span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#eee" }} />
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#eee" }} />
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#FF6B6B", cursor: "pointer" }} />
+          </div>
+        </div>
+
+        <div className="window-content">
+          {/* Step progress */}
+          <div className="step-progress-bar">
+            <div className={`step-pill ${step >= 1 ? "completed" : "active"}`}>01 연결</div>
+            <div className={`step-pill ${step > 2 ? "completed" : step === 2 ? "active" : ""}`}>02 디자인</div>
+            <div className={`step-pill ${step > 3 ? "completed" : step === 3 ? "active" : ""}`}>03 완료</div>
+          </div>
+
+          {/* Error */}
+          {errorMsg && (
+            <div style={{ background: "#FFF0F0", border: "1px solid #FFCDD2", borderRadius: 12, padding: 16, marginBottom: 24, color: "#D32F2F", display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}>
+              <span style={{ fontSize: 18 }}>!</span> {errorMsg}
+            </div>
+          )}
+
+          {/* Step 1 */}
+          {step === 1 && (
+            <div style={{ animation: "fadeIn 0.5s" }}>
+              <div style={{ textAlign: "center", marginBottom: 40 }}>
+                <div style={{ width: 80, height: 80, background: "#FFF0F5", borderRadius: "50%", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Settings2 size={40} color="#E8A8C0" />
+                </div>
+                <h2 style={{ fontSize: 24, marginBottom: 12, fontWeight: 700 }}>Notion 연결하기</h2>
+                <p style={{ color: "#888", fontSize: 15 }}>Integration 토큰을 사용하여 데이터베이스를 불러옵니다.</p>
+              </div>
+
+              <div style={{ maxWidth: 450, margin: "0 auto" }}>
+                <label style={{ display: "block", marginBottom: 10, fontWeight: 600, fontSize: 14, color: "#555" }}>API TOKEN</label>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input
+                    type="password"
+                    className="soft-input"
+                    value={settings.apiKey}
+                    onChange={(e) => { update("apiKey", e.target.value); setDatabases([]); }}
+                    placeholder="secret_..."
+                    style={{ marginBottom: 0 }}
+                  />
+                  <button className="soft-btn secondary" onClick={handleLoadDatabases} disabled={loading} style={{ whiteSpace: "nowrap" }}>
+                    {loading ? "로딩..." : "목록 불러오기"}
+                  </button>
+                </div>
+              </div>
+
+              {databases.length > 0 && (
+                <div style={{ marginTop: 40, animation: "fadeIn 0.5s" }}>
+                  <h3 style={{ textAlign: "center", fontSize: 16, marginBottom: 20, color: "#555" }}>데이터베이스 선택</h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 }}>
+                    {databases.map((db) => (
+                      <div key={db.id} className="db-card" onClick={() => handleSelectDatabase(db.id)}>
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: "#FFF0F5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <CalendarDays size={24} color="#E8A8C0" />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: "#333", marginBottom: 4 }}>{db.title}</div>
+                          <div style={{ fontSize: 12, color: "#999" }}>ID: {db.id.slice(0, 8)}...</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 2 */}
+          {step === 2 && (
+            <div style={{ animation: "fadeIn 0.5s", display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
+              {/* Live preview */}
+              <div style={{ background: "#F7F8FA", padding: "24px 20px", borderRadius: 20, border: "1px solid #eee", width: "100%" }}>
+                <div style={{ textAlign: "center", marginBottom: 16, fontSize: 14, color: "#888", fontWeight: 600 }}>LIVE PREVIEW</div>
+                <div style={{ background: settings.darkMode ? "#191919" : "white", borderRadius: 8, overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", display: "flex", justifyContent: "center" }}>
+                  <div style={{ padding: 10 }}>
+                    <CalendarWidget
+                      configId="preview"
+                      theme={previewTheme}
+                      fontFamily={settings.fontFamily}
+                      previewProjects={makePreviewProjects(settings.multiRow)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ width: "100%" }}>
+                {/* Controls row */}
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 28, marginBottom: 28 }}>
+                  {/* Font + options */}
+                  <div style={{ background: "#F9F9F9", padding: "16px 18px", borderRadius: 16, minWidth: 140 }}>
+                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
+                      <Type size={16} /> 폰트
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {[{ value: "Pretendard", label: "Pretendard" }, { value: "Corbel", label: "Corbel" }, { value: "Galmuri11", label: "갈무리11" }].map((f) => (
+                        <label key={f.value} onClick={() => update("fontFamily", f.value)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.fontFamily === f.value ? "#333" : "#999", fontWeight: settings.fontFamily === f.value ? 600 : 400 }}>
+                          <div style={{ width: 18, height: 18, borderRadius: "50%", border: settings.fontFamily === f.value ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {settings.fontFamily === f.value && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#E8A8C0" }} />}
+                          </div>
+                          {f.label}
+                        </label>
+                      ))}
+                    </div>
+
+                    <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #eee" }}>
+                      <label onClick={() => update("multiRow", !settings.multiRow)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.multiRow ? "#333" : "#999", fontWeight: settings.multiRow ? 600 : 400 }}>
+                        <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.multiRow ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.multiRow ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
+                          {settings.multiRow && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
+                        </div>
+                        겹침 2단
+                      </label>
+                    </div>
+
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #eee" }}>
+                      <label onClick={() => update("darkMode", !settings.darkMode)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.darkMode ? "#333" : "#999", fontWeight: settings.darkMode ? 600 : 400 }}>
+                        <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.darkMode ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.darkMode ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
+                          {settings.darkMode && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
+                        </div>
+                        다크모드
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Theme grid */}
+                  <div>
+                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
+                      <Palette size={16} /> 테마 선택
+                    </div>
+                    <div className="theme-grid">
+                      {THEMES.map((t) => (
+                        <div key={t.name} className={`theme-item ${selectedTheme === t.name ? "selected" : ""}`}
+                          onClick={() => {
+                            setSelectedTheme(t.name);
+                            setSettings((prev) => ({ ...prev, backgroundColor: t.colors.background, primaryColor: t.colors.primary, barColors: [...t.colors.barColors] }));
+                          }}>
+                          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, paddingLeft: 8 }}>
+                            <div className="color-dot" style={{ background: t.colors.background }} />
+                            <div className="color-dot" style={{ background: t.colors.primary }} />
+                            {t.colors.barColors.slice(0, 3).map((c, i) => <div key={i} className="color-dot" style={{ background: c }} />)}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#555" }}>{t.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Color pickers */}
+                  <div style={{ background: "#F9F9F9", padding: "16px 18px", borderRadius: 16, width: 180 }}>
+                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>색상</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+                      {[
+                        { label: "기본", key: "primaryColor" as const },
+                        { label: "배경", key: "backgroundColor" as const },
+                        { label: "글자", key: "labelColor" as const },
+                      ].map(({ label, key }) => (
+                        <div key={key}>
+                          <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{label}</div>
+                          <div className="color-picker-wrapper" style={{ padding: "6px 8px" }}>
+                            <span style={{ fontSize: 11, color: "#555" }}>{settings[key]}</span>
+                            <input type="color" className="color-input-circle" value={settings[key] as string} style={{ width: 24, height: 24 }}
+                              onChange={(e) => { update(key, e.target.value); if (key !== "labelColor") setSelectedTheme(""); }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, color: "#666" }}>투명도</span>
+                        <span style={{ fontSize: 11, fontWeight: "bold", color: "#E8A8C0" }}>{settings.backgroundOpacity}%</span>
+                      </div>
+                      <input type="range" min={0} max={100} value={settings.backgroundOpacity} className="range-slider"
+                        onChange={(e) => update("backgroundOpacity", parseInt(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bar colors */}
+                <div style={{ background: "#F0F4F8", padding: "16px 20px", borderRadius: 16, marginBottom: 28 }}>
+                  <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>프로젝트 바 색상 팔레트</div>
+                  <div className="bar-colors-grid">
+                    {settings.barColors.map((color, i) => (
+                      <div key={i} className="bar-color-item">
+                        <input type="color" className="bar-color-input" value={color}
+                          onChange={(e) => {
+                            const next = [...settings.barColors];
+                            next[i] = e.target.value;
+                            update("barColors", next);
+                            setSelectedTheme("");
+                          }} />
+                        <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", width: "100%", maxWidth: 560, paddingBottom: 60 }}>
+                <button className="soft-btn secondary" onClick={() => setStep(1)} style={{ padding: "14px 28px" }}>이전</button>
+                <button className="soft-btn" onClick={handleGenerate} disabled={generating} style={{ flex: 1 }}>
+                  {generating ? "생성 중..." : "완료 및 생성"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Generating spinner */}
+          {generating && (
+            <div style={{ textAlign: "center", padding: "60px 0", animation: "fadeIn 0.5s" }}>
+              <div style={{ fontSize: 50, marginBottom: 30, display: "inline-block", animation: "spin 2s linear infinite" }}>💿</div>
+              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>위젯을 굽고 있습니다...</h3>
+              <p style={{ color: "#888", fontSize: 15 }}>잠시만 기다려주세요.</p>
+            </div>
+          )}
+
+          {/* Step 3 */}
+          {step === 3 && (
+            <div style={{ textAlign: "center", animation: "fadeIn 0.5s", padding: "40px 0" }}>
+              <div style={{ width: 80, height: 80, background: "#E8F5E9", borderRadius: "50%", margin: "0 auto 24px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>🎉</div>
+              <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12, color: "#333" }}>설치가 완료되었습니다!</h2>
+              <p style={{ marginBottom: 40, color: "#666", fontSize: 16 }}>아래 링크를 노션에 &apos;임베드&apos;하여 사용하세요.</p>
+
+              <div style={{ background: "#F9F9F9", border: "1px solid #eee", borderRadius: 12, padding: 20, maxWidth: 500, margin: "0 auto 30px" }}>
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 8, textAlign: "left", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Settings2 size={14} /> 프로젝트 캘린더 URL
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input className="soft-input" readOnly value={generatedUrl} style={{ marginBottom: 0, fontSize: 14, background: "white" }} />
+                  <button className="soft-btn" onClick={() => { navigator.clipboard.writeText(generatedUrl); alert("복사되었습니다!"); }} style={{ padding: "0 20px" }}>
+                    <Copy size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
+                <button className="soft-btn" onClick={() => window.open(generatedUrl, "_blank")}>
+                  <Monitor size={16} /> 캘린더 확인
+                </button>
+                <button className="soft-btn secondary" onClick={() => setStep(2)}>
+                  <Palette size={16} /> 디자인 수정하기
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="footer">
+        Y2K Project Calendar<br />
+        <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </div>
+    </>
+  );
+}
