@@ -57,7 +57,6 @@ export default function CalendarWidget({
   fontFamily = "Pretendard",
   previewProjects,
 }: CalendarWidgetProps) {
-  // Use null initial state to avoid SSR/client date mismatch
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
   const [todayStr, setTodayStr] = useState<string>("");
