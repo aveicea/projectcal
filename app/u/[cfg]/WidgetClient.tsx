@@ -1,13 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
+import { useState, useEffect } from "react";
+import CalendarWidget from "@/components/CalendarWidget";
 import { DEFAULT_BAR_COLORS } from "@/lib/calendarUtils";
-
-const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
-  ssr: false,
-  loading: () => null,
-});
 
 interface Config {
   id: string;
@@ -34,7 +29,7 @@ interface Config {
 export default function WidgetClient({ cfg }: { cfg: string }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [barColors, setBarColors] = useState<string[]>(DEFAULT_BAR_COLORS);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -50,17 +45,17 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
       setConfig({
         id: "embedded",
         notionConfig: {
-          apiKey: json.token,
-          databaseId: json.dbId,
-          dateProperty: json.dateProp,
-          titleProperty: json.titleProp,
+          apiKey: json.token ?? "",
+          databaseId: json.dbId ?? "",
+          dateProperty: json.dateProp ?? "날짜",
+          titleProperty: json.titleProp ?? "제목",
         },
         theme: {
           primaryColor: json.primaryColor ?? "#E8A8C0",
           backgroundColor: json.backgroundColor ?? "#FFFFFF",
           backgroundOpacity: json.backgroundOpacity ?? 100,
           fontFamily: json.fontFamily ?? "Pretendard",
-          barColors: json.barColors ?? DEFAULT_BAR_COLORS,
+          barColors: Array.isArray(json.barColors) ? json.barColors : DEFAULT_BAR_COLORS,
           labelColor: json.labelColor ?? "#444444",
           multiRow: json.multiRow ?? false,
           darkMode: json.darkMode ?? false,
@@ -70,16 +65,16 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
       });
     } catch (e) {
       console.error("Config decode error:", e);
-      setError(true);
+      setError(e instanceof Error ? e.message : String(e));
     }
   }, [cfg]);
 
   if (error) {
     return (
       <div style={{ width: "100%", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", color: "#e53e3e" }}>
+        <div style={{ textAlign: "center", color: "#e53e3e", fontFamily: "monospace" }}>
           <h2>위젯 설정 오류</h2>
-          <p>URL 파라미터가 올바르지 않습니다.</p>
+          <pre style={{ fontSize: 12, background: "#fff5f5", padding: 12, borderRadius: 8 }}>{error}</pre>
         </div>
       </div>
     );
@@ -91,7 +86,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
 
   return (
     <>
-      <style>{`
+      <style suppressHydrationWarning>{`
         html, body {
           background: ${darkMode ? "#191919" : "transparent"} !important;
           background-color: ${darkMode ? "#191919" : "transparent"} !important;
