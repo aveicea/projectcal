@@ -1,12 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
-import CalendarWidget from "@/components/CalendarWidget";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
 
+const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
+  ssr: false,
+  loading: () => <div style={{ height: 120 }} />,
+});
+
 const THEMES = [
-  { name: "파스텔톤", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
+  { name: "파스텔�", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
   { name: "핑크",    colors: { background: "#FFF5F8", primary: "#F19CB6", barColors: ["#FFB3BA","#FFDBE7","#FFD1DC","#F8C8DC","#FF9EC1","#FFC4D6","#FF85A2","#FFE4ED"] } },
   { name: "블랙",    colors: { background: "#1E1E1E", primary: "#4A4A4A", barColors: ["#6B7280","#9CA3AF","#D1D5DB","#E5E7EB","#F3F4F6","#8B5CF6","#EC4899","#F97316"] } },
   { name: "화이트",  colors: { background: "#FFFFFF", primary: "#2D2D2D", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
@@ -59,7 +64,7 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
-  const [selectedTheme, setSelectedTheme] = useState("파스텔톤");
+  const [selectedTheme, setSelectedTheme] = useState("파스텔�");
   const [generatedUrl, setGeneratedUrl] = useState("");
 
   const [settings, setSettings] = useState<Settings>({
@@ -321,7 +326,6 @@ export default function OnboardingPage() {
       `}</style>
 
       <div className="pixel-window">
-        {/* Title bar */}
         <div className="title-bar">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Settings2 size={18} strokeWidth={2.5} />
@@ -335,21 +339,18 @@ export default function OnboardingPage() {
         </div>
 
         <div className="window-content">
-          {/* Step progress */}
           <div className="step-progress-bar">
             <div className={`step-pill ${step >= 1 ? "completed" : "active"}`}>01 연결</div>
             <div className={`step-pill ${step > 2 ? "completed" : step === 2 ? "active" : ""}`}>02 디자인</div>
             <div className={`step-pill ${step > 3 ? "completed" : step === 3 ? "active" : ""}`}>03 완료</div>
           </div>
 
-          {/* Error */}
           {errorMsg && (
             <div style={{ background: "#FFF0F0", border: "1px solid #FFCDD2", borderRadius: 12, padding: 16, marginBottom: 24, color: "#D32F2F", display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}>
               <span style={{ fontSize: 18 }}>!</span> {errorMsg}
             </div>
           )}
 
-          {/* Step 1 */}
           {step === 1 && (
             <div style={{ animation: "fadeIn 0.5s" }}>
               <div style={{ textAlign: "center", marginBottom: 40 }}>
@@ -359,24 +360,17 @@ export default function OnboardingPage() {
                 <h2 style={{ fontSize: 24, marginBottom: 12, fontWeight: 700 }}>Notion 연결하기</h2>
                 <p style={{ color: "#888", fontSize: 15 }}>Integration 토큰을 사용하여 데이터베이스를 불러옵니다.</p>
               </div>
-
               <div style={{ maxWidth: 450, margin: "0 auto" }}>
                 <label style={{ display: "block", marginBottom: 10, fontWeight: 600, fontSize: 14, color: "#555" }}>API TOKEN</label>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <input
-                    type="password"
-                    className="soft-input"
-                    value={settings.apiKey}
+                  <input type="password" className="soft-input" value={settings.apiKey}
                     onChange={(e) => { update("apiKey", e.target.value); setDatabases([]); }}
-                    placeholder="secret_..."
-                    style={{ marginBottom: 0 }}
-                  />
+                    placeholder="secret_..." style={{ marginBottom: 0 }} />
                   <button className="soft-btn secondary" onClick={handleLoadDatabases} disabled={loading} style={{ whiteSpace: "nowrap" }}>
                     {loading ? "로딩..." : "목록 불러오기"}
                   </button>
                 </div>
               </div>
-
               {databases.length > 0 && (
                 <div style={{ marginTop: 40, animation: "fadeIn 0.5s" }}>
                   <h3 style={{ textAlign: "center", fontSize: 16, marginBottom: 20, color: "#555" }}>데이터베이스 선택</h3>
@@ -398,32 +392,20 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 2 */}
           {step === 2 && (
             <div style={{ animation: "fadeIn 0.5s", display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
-              {/* Live preview */}
               <div style={{ background: "#F7F8FA", padding: "24px 20px", borderRadius: 20, border: "1px solid #eee", width: "100%" }}>
                 <div style={{ textAlign: "center", marginBottom: 16, fontSize: 14, color: "#888", fontWeight: 600 }}>LIVE PREVIEW</div>
                 <div style={{ background: settings.darkMode ? "#191919" : "white", borderRadius: 8, overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", display: "flex", justifyContent: "center" }}>
                   <div style={{ padding: 10 }}>
-                    <CalendarWidget
-                      configId="preview"
-                      theme={previewTheme}
-                      fontFamily={settings.fontFamily}
-                      previewProjects={makePreviewProjects(settings.multiRow)}
-                    />
+                    <CalendarWidget configId="preview" theme={previewTheme} fontFamily={settings.fontFamily} previewProjects={makePreviewProjects(settings.multiRow)} />
                   </div>
                 </div>
               </div>
-
               <div style={{ width: "100%" }}>
-                {/* Controls row */}
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 28, marginBottom: 28 }}>
-                  {/* Font + options */}
                   <div style={{ background: "#F9F9F9", padding: "16px 18px", borderRadius: 16, minWidth: 140 }}>
-                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
-                      <Type size={16} /> 폰트
-                    </div>
+                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}><Type size={16} /> 폰트</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {[{ value: "Pretendard", label: "Pretendard" }, { value: "Corbel", label: "Corbel" }, { value: "Galmuri11", label: "갈무리11" }].map((f) => (
                         <label key={f.value} onClick={() => update("fontFamily", f.value)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.fontFamily === f.value ? "#333" : "#999", fontWeight: settings.fontFamily === f.value ? 600 : 400 }}>
@@ -434,16 +416,14 @@ export default function OnboardingPage() {
                         </label>
                       ))}
                     </div>
-
                     <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #eee" }}>
                       <label onClick={() => update("multiRow", !settings.multiRow)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.multiRow ? "#333" : "#999", fontWeight: settings.multiRow ? 600 : 400 }}>
                         <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.multiRow ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.multiRow ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
                           {settings.multiRow && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
                         </div>
-                        겹침 2단
+                        겨침 2단
                       </label>
                     </div>
-
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #eee" }}>
                       <label onClick={() => update("darkMode", !settings.darkMode)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.darkMode ? "#333" : "#999", fontWeight: settings.darkMode ? 600 : 400 }}>
                         <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.darkMode ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.darkMode ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
@@ -453,19 +433,12 @@ export default function OnboardingPage() {
                       </label>
                     </div>
                   </div>
-
-                  {/* Theme grid */}
                   <div>
-                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
-                      <Palette size={16} /> 테마 선택
-                    </div>
+                    <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}><Palette size={16} /> 테마 선택</div>
                     <div className="theme-grid">
                       {THEMES.map((t) => (
                         <div key={t.name} className={`theme-item ${selectedTheme === t.name ? "selected" : ""}`}
-                          onClick={() => {
-                            setSelectedTheme(t.name);
-                            setSettings((prev) => ({ ...prev, backgroundColor: t.colors.background, primaryColor: t.colors.primary, barColors: [...t.colors.barColors] }));
-                          }}>
+                          onClick={() => { setSelectedTheme(t.name); setSettings((prev) => ({ ...prev, backgroundColor: t.colors.background, primaryColor: t.colors.primary, barColors: [...t.colors.barColors] })); }}>
                           <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, paddingLeft: 8 }}>
                             <div className="color-dot" style={{ background: t.colors.background }} />
                             <div className="color-dot" style={{ background: t.colors.primary }} />
@@ -476,16 +449,10 @@ export default function OnboardingPage() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Color pickers */}
                   <div style={{ background: "#F9F9F9", padding: "16px 18px", borderRadius: 16, width: 180 }}>
                     <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>색상</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-                      {[
-                        { label: "기본", key: "primaryColor" as const },
-                        { label: "배경", key: "backgroundColor" as const },
-                        { label: "글자", key: "labelColor" as const },
-                      ].map(({ label, key }) => (
+                      {[{ label: "기본", key: "primaryColor" as const }, { label: "배경", key: "backgroundColor" as const }, { label: "글자", key: "labelColor" as const }].map(({ label, key }) => (
                         <div key={key}>
                           <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{label}</div>
                           <div className="color-picker-wrapper" style={{ padding: "6px 8px" }}>
@@ -506,27 +473,19 @@ export default function OnboardingPage() {
                     </div>
                   </div>
                 </div>
-
-                {/* Bar colors */}
                 <div style={{ background: "#F0F4F8", padding: "16px 20px", borderRadius: 16, marginBottom: 28 }}>
                   <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>프로젝트 바 색상 팔레트</div>
                   <div className="bar-colors-grid">
                     {settings.barColors.map((color, i) => (
                       <div key={i} className="bar-color-item">
                         <input type="color" className="bar-color-input" value={color}
-                          onChange={(e) => {
-                            const next = [...settings.barColors];
-                            next[i] = e.target.value;
-                            update("barColors", next);
-                            setSelectedTheme("");
-                          }} />
+                          onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
                         <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               </div>
-
               <div style={{ display: "flex", gap: 10, justifyContent: "center", width: "100%", maxWidth: 560, paddingBottom: 60 }}>
                 <button className="soft-btn secondary" onClick={() => setStep(1)} style={{ padding: "14px 28px" }}>이전</button>
                 <button className="soft-btn" onClick={handleGenerate} disabled={generating} style={{ flex: 1 }}>
@@ -536,22 +495,19 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Generating spinner */}
           {generating && (
             <div style={{ textAlign: "center", padding: "60px 0", animation: "fadeIn 0.5s" }}>
               <div style={{ fontSize: 50, marginBottom: 30, display: "inline-block", animation: "spin 2s linear infinite" }}>💿</div>
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>위젯을 굽고 있습니다...</h3>
+              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>위젯을 괽고 있습니다...</h3>
               <p style={{ color: "#888", fontSize: 15 }}>잠시만 기다려주세요.</p>
             </div>
           )}
 
-          {/* Step 3 */}
           {step === 3 && (
             <div style={{ textAlign: "center", animation: "fadeIn 0.5s", padding: "40px 0" }}>
               <div style={{ width: 80, height: 80, background: "#E8F5E9", borderRadius: "50%", margin: "0 auto 24px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>🎉</div>
               <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12, color: "#333" }}>설치가 완료되었습니다!</h2>
               <p style={{ marginBottom: 40, color: "#666", fontSize: 16 }}>아래 링크를 노션에 &apos;임베드&apos;하여 사용하세요.</p>
-
               <div style={{ background: "#F9F9F9", border: "1px solid #eee", borderRadius: 12, padding: 20, maxWidth: 500, margin: "0 auto 30px" }}>
                 <div style={{ fontSize: 13, color: "#888", marginBottom: 8, textAlign: "left", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                   <Settings2 size={14} /> 프로젝트 캘린더 URL
@@ -563,7 +519,6 @@ export default function OnboardingPage() {
                   </button>
                 </div>
               </div>
-
               <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
                 <button className="soft-btn" onClick={() => window.open(generatedUrl, "_blank")}>
                   <Monitor size={16} /> 캘린더 확인
