@@ -18,7 +18,7 @@ const THEMES = [
   { name: "보라",    colors: { background: "#F8F5FF", primary: "#B97FE7", barColors: ["#E2D1F0","#D4B8F0","#C9A0FF","#B388FF","#E8C8FF","#F0D0FF","#D1B3FF","#C7A3FF"] } },
   { name: "그린",    colors: { background: "#F5FBF7", primary: "#66C497", barColors: ["#C6EBC5","#B5EAD7","#A8E6CF","#98D8C8","#88D8B0","#B4F0A7","#C1F0C1","#D0F0C0"] } },
   { name: "블루",    colors: { background: "#F5FAFF", primary: "#5FA3EE", barColors: ["#BAE1FF","#A0C4FF","#BDB2FF","#9BF6FF","#CAF0F8","#ADE8F4","#90E0EF","#48CAE4"] } },
-  { name: "노랑",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
+  { name: "노란",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
 ];
 
 interface Settings {
@@ -26,6 +26,7 @@ interface Settings {
   apiKey: string;
   dateProperty: string;
   titleProperty: string;
+  groupProperty: string;
   primaryColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -64,6 +65,8 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
+  const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
+  const [selectedDbName, setSelectedDbName] = useState("");
   const [selectedTheme, setSelectedTheme] = useState("파스텔�");
   const [generatedUrl, setGeneratedUrl] = useState("");
 
@@ -72,6 +75,7 @@ export default function OnboardingPage() {
     apiKey: "",
     dateProperty: "날짜",
     titleProperty: "제목",
+    groupProperty: "",
     primaryColor: "#B5E3F0",
     backgroundColor: "#FFFCF9",
     backgroundOpacity: 100,
@@ -111,8 +115,10 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleSelectDatabase = async (dbId: string) => {
+  const handleSelectDatabase = async (dbId: string, dbTitle: string) => {
     update("databaseId", dbId);
+    setSelectedDbName(dbTitle);
+    setGroupableProperties([]);
     setLoading(true);
     setErrorMsg(null);
     try {
@@ -128,13 +134,14 @@ export default function OnboardingPage() {
           databaseId: dbId,
           dateProperty: json.data.dateProperty || prev.dateProperty,
           titleProperty: json.data.titleProperty || prev.titleProperty,
+          groupProperty: "",
         }));
+        setGroupableProperties(json.data.groupableProperties ?? []);
       }
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
-      setStep(2);
     }
   };
 
@@ -147,6 +154,7 @@ export default function OnboardingPage() {
         dbId: settings.databaseId,
         dateProp: settings.dateProperty,
         titleProp: settings.titleProperty,
+        ...(settings.groupProperty.trim() ? { groupProp: settings.groupProperty.trim() } : {}),
         primaryColor: settings.primaryColor,
         backgroundColor: settings.backgroundColor,
         backgroundOpacity: settings.backgroundOpacity,
@@ -267,6 +275,7 @@ export default function OnboardingPage() {
           box-shadow: 0 2px 10px rgba(0,0,0,0.02);
         }
         .db-card:hover { border-color: #E8A8C0; transform: translateY(-4px); box-shadow: 0 10px 20px rgba(232,168,192,0.15); }
+        .db-card.selected { border-color: #E8A8C0; background: #FFF5F8; box-shadow: 0 0 0 2px #E8A8C0; }
 
         .theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
         .theme-item {
@@ -376,7 +385,7 @@ export default function OnboardingPage() {
                   <h3 style={{ textAlign: "center", fontSize: 16, marginBottom: 20, color: "#555" }}>데이터베이스 선택</h3>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 }}>
                     {databases.map((db) => (
-                      <div key={db.id} className="db-card" onClick={() => handleSelectDatabase(db.id)}>
+                      <div key={db.id} className={`db-card${settings.databaseId === db.id ? " selected" : ""}`} onClick={() => handleSelectDatabase(db.id, db.title)}>
                         <div style={{ width: 48, height: 48, borderRadius: 12, background: "#FFF0F5", display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <CalendarDays size={24} color="#E8A8C0" />
                         </div>
@@ -386,6 +395,51 @@ export default function OnboardingPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+              {settings.databaseId && !loading && (
+                <div style={{ marginTop: 36, animation: "fadeIn 0.5s", maxWidth: 480, margin: "36px auto 0" }}>
+                  <div style={{ background: "#FFF8FB", border: "1px solid #F0D0DA", borderRadius: 16, padding: "24px 28px" }}>
+                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 20, color: "#555", display: "flex", alignItems: "center", gap: 8 }}>
+                      <CalendarDays size={16} color="#E8A8C0" /> {selectedDbName} — 속성 설정
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                      <div>
+                        <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>날짜 속성</label>
+                        <input className="soft-input" value={settings.dateProperty}
+                          onChange={(e) => update("dateProperty", e.target.value)}
+                          style={{ marginBottom: 0, fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>제목 속성</label>
+                        <input className="soft-input" value={settings.titleProperty}
+                          onChange={(e) => update("titleProperty", e.target.value)}
+                          style={{ marginBottom: 0, fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 24 }}>
+                      <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>그룹 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(선택)</span></label>
+                      {groupableProperties.length > 0 ? (
+                        <select className="soft-select" value={settings.groupProperty}
+                          onChange={(e) => update("groupProperty", e.target.value)}
+                          style={{ marginBottom: 0 }}>
+                          <option value="">— 없음 —</option>
+                          {groupableProperties.map((p) => (
+                            <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input className="soft-input" value={settings.groupProperty}
+                          onChange={(e) => update("groupProperty", e.target.value)}
+                          placeholder="예: 팀, 카테고리"
+                          style={{ marginBottom: 0 }} />
+                      )}
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 5 }}>같은 속성값끼리 같은 행에 묶어서 표시</div>
+                    </div>
+                    <button className="soft-btn" onClick={() => setStep(2)} style={{ width: "100%" }}>
+                      다음: 디자인 설정 →
+                    </button>
                   </div>
                 </div>
               )}
