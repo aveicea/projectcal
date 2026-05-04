@@ -11,6 +11,7 @@ interface Config {
     databaseId: string;
     dateProperty: string;
     titleProperty: string;
+    groupProperty?: string;
   };
   theme: {
     primaryColor: string;
@@ -49,6 +50,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
           databaseId: json.dbId ?? "",
           dateProperty: json.dateProp ?? "날짜",
           titleProperty: json.titleProp ?? "제목",
+          groupProperty: json.groupProp || undefined,
         },
         theme: {
           primaryColor: json.primaryColor ?? "#E8A8C0",

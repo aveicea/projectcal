@@ -6,6 +6,7 @@ interface EventConfig {
   dbId: string;
   dateProp: string;
   titleProp: string;
+  groupProp?: string;
 }
 
 type PropMap = Record<string, {
@@ -13,6 +14,9 @@ type PropMap = Record<string, {
   date?: { start?: string; end?: string | null };
   title?: Array<{ plain_text?: string }>;
   rich_text?: Array<{ plain_text?: string }>;
+  select?: { name?: string };
+  multi_select?: Array<{ name?: string }>;
+  formula?: { string?: string };
 }>;
 
 export async function POST(req: NextRequest) {
@@ -44,7 +48,6 @@ export async function POST(req: NextRequest) {
         if (titleProp?.type === "title" && titleProp.title) {
           title = titleProp.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
         } else {
-          // fallback: find any title property
           for (const prop of Object.values(props)) {
             if (prop.type === "title" && prop.title) {
               title = prop.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
@@ -60,8 +63,18 @@ export async function POST(req: NextRequest) {
         const eventStart = dateProp.date.start.slice(0, 10);
         const eventEnd = (dateProp.date.end ?? dateProp.date.start).slice(0, 10);
 
-        // Filter out events outside the range
         if (eventEnd < startDate || eventStart > endDate) return null;
+
+        // Get group property value
+        let group: string | undefined;
+        if (config.groupProp) {
+          const gp = props[config.groupProp];
+          if (gp?.type === "select") group = gp.select?.name;
+          else if (gp?.type === "multi_select") group = gp.multi_select?.[0]?.name;
+          else if (gp?.type === "rich_text") group = gp.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
+          else if (gp?.type === "title") group = gp.title?.map((t) => t.plain_text ?? "").join("") || undefined;
+          else if (gp?.type === "formula") group = gp.formula?.string || undefined;
+        }
 
         return {
           id: page.id,
@@ -69,6 +82,7 @@ export async function POST(req: NextRequest) {
           startDate: eventStart,
           endDate: eventEnd,
           pageUrl: (page as { url?: string }).url ?? "#",
+          ...(group ? { group } : {}),
         };
       })
       .filter(Boolean);

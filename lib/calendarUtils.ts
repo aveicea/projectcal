@@ -5,6 +5,7 @@ export interface Project {
   endDate: string;
   pageUrl: string;
   color?: string;
+  group?: string;
 }
 
 export interface ProjectSegment extends Project {
@@ -124,10 +125,21 @@ export function assignRows(
   return rowMap;
 }
 
+// Groups events by group value, assigns same color to same group.
 export function assignColors(
   projects: Project[],
-  colors: string[] = DEFAULT_BAR_COLORS
+  colors: string[] = DEFAULT_BAR_COLORS,
+  useGroupColors = false,
 ): ProjectSegment[] {
+  if (useGroupColors) {
+    const groupColorMap = new Map<string, string>();
+    let idx = 0;
+    return projects.map((p) => {
+      const key = p.group?.trim() ? p.group : `__id__${p.id}`;
+      if (!groupColorMap.has(key)) groupColorMap.set(key, colors[idx++ % colors.length]);
+      return { ...p, color: groupColorMap.get(key)!, isStart: false, isEnd: false, duration: 0, rowIndex: 0 };
+    });
+  }
   return projects.map((p, i) => ({
     ...p,
     color: colors[i % colors.length],
@@ -136,6 +148,81 @@ export function assignColors(
     duration: 0,
     rowIndex: 0,
   }));
+}
+
+// Group-aware row assignment:
+// - Same-group events stay in a contiguous band of rows
+// - Groups pack into the lowest available band (no time conflict)
+// - Minimizes total rows while keeping same-group events together
+export function assignRowsGrouped(projects: ProjectSegment[]): Map<string, number> {
+  if (projects.length === 0) return new Map();
+
+  // Bucket by group
+  const groups = new Map<string, ProjectSegment[]>();
+  for (const p of projects) {
+    const key = p.group?.trim() || "__ungrouped__";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(p);
+  }
+
+  // Interval-schedule within each group to get local row offsets
+  const groupLocalRows = new Map<string, Map<string, number>>();
+  for (const [key, gp] of groups) {
+    const sorted = [...gp].sort((a, b) => a.startDate.localeCompare(b.startDate));
+    const localMap = new Map<string, number>();
+    const ends: string[] = [];
+    for (const p of sorted) {
+      let placed = false;
+      for (let r = 0; r < ends.length; r++) {
+        if (p.startDate > ends[r]) {
+          localMap.set(p.id, r);
+          ends[r] = p.endDate;
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) { localMap.set(p.id, ends.length); ends.push(p.endDate); }
+    }
+    groupLocalRows.set(key, localMap);
+  }
+
+  // Sort groups by earliest start date
+  const sortedGroups = [...groups.entries()].sort(([, a], [, b]) => {
+    const minA = a.reduce((m, p) => (p.startDate < m ? p.startDate : m), a[0].startDate);
+    const minB = b.reduce((m, p) => (p.startDate < m ? p.startDate : m), b[0].startDate);
+    return minA.localeCompare(minB);
+  });
+
+  // Place each group at the lowest baseRow where all events fit (no time conflicts)
+  const result = new Map<string, number>();
+  const rowOcc = new Map<number, Array<{ s: string; e: string }>>();
+
+  const conflicts = (row: number, start: string, end: string) => {
+    const occ = rowOcc.get(row);
+    return occ ? occ.some((o) => start <= o.e && end >= o.s) : false;
+  };
+
+  for (const [key, gp] of sortedGroups) {
+    const localMap = groupLocalRows.get(key)!;
+    let baseRow = 0;
+    outer: while (true) {
+      for (const p of gp) {
+        if (conflicts(baseRow + localMap.get(p.id)!, p.startDate, p.endDate)) {
+          baseRow++;
+          continue outer;
+        }
+      }
+      break;
+    }
+    for (const p of gp) {
+      const globalRow = baseRow + localMap.get(p.id)!;
+      result.set(p.id, globalRow);
+      if (!rowOcc.has(globalRow)) rowOcc.set(globalRow, []);
+      rowOcc.get(globalRow)!.push({ s: p.startDate, e: p.endDate });
+    }
+  }
+
+  return result;
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
