@@ -24,7 +24,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty } });
+    const groupableTypes = ["select", "multi_select", "rich_text", "formula", "title"];
+    const groupableProperties = Object.entries(props)
+      .filter(([, p]) => groupableTypes.includes(p.type))
+      .map(([name, p]) => ({ name, type: p.type }));
+
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, groupableProperties } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });
