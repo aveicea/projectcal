@@ -8,6 +8,7 @@ import {
   DEFAULT_BAR_COLORS,
   getDaysInMonth,
   assignRows,
+  assignRowsGrouped,
   assignColors,
   hexToRgba,
   lightenColor,
@@ -24,6 +25,7 @@ interface CalendarConfig {
     databaseId: string;
     dateProperty: string;
     titleProperty: string;
+    groupProperty?: string;
   };
   theme: CalendarTheme;
 }
@@ -158,6 +160,7 @@ export default function CalendarWidget({
               dbId: config.notionConfig.databaseId,
               dateProp: config.notionConfig.dateProperty,
               titleProp: config.notionConfig.titleProperty,
+              groupProp: config.notionConfig.groupProperty,
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -165,7 +168,8 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
+        const hasGroups = !!config.notionConfig.groupProperty;
+        setProjects(json.success && json.data ? assignColors(json.data, barColors, hasGroups) : []);
       } catch (e) {
         console.error(e);
         setError("프로젝트를 불러올 수 없습니다.");
@@ -193,7 +197,8 @@ export default function CalendarWidget({
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
 
-  const rowMap = assignRows(projects, multiRow);
+  const hasGroupData = projects.some((p) => p.group);
+  const rowMap = hasGroupData ? assignRowsGrouped(projects) : assignRows(projects, multiRow);
   const effectiveRowMap = new Map(rowMap);
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);

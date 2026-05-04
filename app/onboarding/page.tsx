@@ -18,7 +18,7 @@ const THEMES = [
   { name: "보라",    colors: { background: "#F8F5FF", primary: "#B97FE7", barColors: ["#E2D1F0","#D4B8F0","#C9A0FF","#B388FF","#E8C8FF","#F0D0FF","#D1B3FF","#C7A3FF"] } },
   { name: "그린",    colors: { background: "#F5FBF7", primary: "#66C497", barColors: ["#C6EBC5","#B5EAD7","#A8E6CF","#98D8C8","#88D8B0","#B4F0A7","#C1F0C1","#D0F0C0"] } },
   { name: "블루",    colors: { background: "#F5FAFF", primary: "#5FA3EE", barColors: ["#BAE1FF","#A0C4FF","#BDB2FF","#9BF6FF","#CAF0F8","#ADE8F4","#90E0EF","#48CAE4"] } },
-  { name: "노랑",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
+  { name: "노란",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
 ];
 
 interface Settings {
@@ -26,6 +26,7 @@ interface Settings {
   apiKey: string;
   dateProperty: string;
   titleProperty: string;
+  groupProperty: string;
   primaryColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -72,6 +73,7 @@ export default function OnboardingPage() {
     apiKey: "",
     dateProperty: "날짜",
     titleProperty: "제목",
+    groupProperty: "",
     primaryColor: "#B5E3F0",
     backgroundColor: "#FFFCF9",
     backgroundOpacity: 100,
@@ -147,6 +149,7 @@ export default function OnboardingPage() {
         dbId: settings.databaseId,
         dateProp: settings.dateProperty,
         titleProp: settings.titleProperty,
+        ...(settings.groupProperty.trim() ? { groupProp: settings.groupProperty.trim() } : {}),
         primaryColor: settings.primaryColor,
         backgroundColor: settings.backgroundColor,
         backgroundOpacity: settings.backgroundOpacity,
@@ -431,6 +434,17 @@ export default function OnboardingPage() {
                         </div>
                         다크모드
                       </label>
+                    </div>
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #eee" }}>
+                      <div style={{ fontSize: 11, color: "#888", marginBottom: 6, fontWeight: 600 }}>그룹 속성 (선택)</div>
+                      <input
+                        className="soft-input"
+                        value={settings.groupProperty}
+                        onChange={(e) => update("groupProperty", e.target.value)}
+                        placeholder="예: 팀, 카테고리"
+                        style={{ marginBottom: 0, fontSize: 12, padding: "8px 10px" }}
+                      />
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 4 }}>같은 속성값끼리 같은 행에 묶어서 표시</div>
                     </div>
                   </div>
                   <div>
