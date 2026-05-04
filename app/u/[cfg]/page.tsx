@@ -1,5 +1,6 @@
 import WidgetShell from "./WidgetShell";
 
-export default function Page({ params }: { params: { cfg: string } }) {
-  return <WidgetShell cfg={params.cfg} />;
+export default async function Page({ params }: { params: Promise<{ cfg: string }> }) {
+  const { cfg } = await params;
+  return <WidgetShell cfg={cfg} />;
 }
