@@ -3,7 +3,7 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/u/:cfg*',
+        source: '/(.*)',
         headers: [
           { key: 'Content-Security-Policy', value: "frame-ancestors *" },
         ],
