@@ -280,7 +280,20 @@ export default function CalendarWidget({
       });
   }
 
-  if (centerYear === null || centerMonth === null) return null;
+  if (centerYear === null || centerMonth === null) {
+    return (
+      <div style={{
+        fontFamily: font, background: bgColor,
+        border: darkMode ? "none" : `1px solid ${primaryColor}`,
+        outline: darkMode ? "none" : `2px solid ${lightenColor(primaryColor, 0.85)}`,
+        borderRadius: 10, overflow: "hidden",
+        padding: "20px 40px", fontSize: 11, color: "#aaa",
+        minWidth: 200,
+      }}>
+        로딩 중...
+      </div>
+    );
+  }
 
   const centerMonthLabel = new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
