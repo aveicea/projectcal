@@ -50,7 +50,7 @@ interface CalendarWidgetProps {
 }
 
 const DAY_WIDTH = 25;
-const WEEK_DAY_WIDTH = 80;
+const WEEK_DAY_WIDTH = 100;
 const ROW_HEIGHT = 26;
 const BAR_HEIGHT = 22;
 
@@ -301,7 +301,7 @@ export default function CalendarWidget({
         outline: darkMode ? "none" : `2px solid ${headerBg}`,
         boxShadow: darkMode ? "none" : `2px 2px 0px ${primaryColor}4D, 4px 4px 12px ${primaryColor}26`,
         borderRadius: 10, overflow: "hidden", userSelect: "none",
-        width: "fit-content", maxWidth: "98vw",
+        width: weekView ? "100%" : "fit-content", maxWidth: "98vw",
         display: "flex", flexDirection: "column", position: "relative",
       }}>
         <div style={{
@@ -339,7 +339,7 @@ export default function CalendarWidget({
             onWheel={(e) => { if (!weekView && bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
             style={{
               padding: "10px 0 18px", overflowX: weekView ? "hidden" : "auto",
-              display: "flex", background: bgColor,
+              display: "flex", background: bgColor, width: weekView ? "100%" : undefined,
               scrollbarWidth: "thin", scrollbarColor: `${primaryColor}40 transparent`,
             }}
           >
