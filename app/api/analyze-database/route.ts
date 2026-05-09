@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const groupableTypes = ["select", "multi_select", "rich_text", "formula", "title"];
+    const groupableTypes = ["select", "multi_select", "rich_text", "formula", "title", "rollup", "relation"];
     const groupableProperties = Object.entries(props)
       .filter(([, p]) => groupableTypes.includes(p.type))
       .map(([name, p]) => ({ name, type: p.type }));

@@ -9,6 +9,12 @@ interface EventConfig {
   groupProp?: string;
 }
 
+type RollupValue =
+  | { type: "number"; number: number | null }
+  | { type: "date"; date: { start?: string } | null }
+  | { type: "array"; array: Array<{ type: string; select?: { name?: string }; multi_select?: Array<{ name?: string }>; rich_text?: Array<{ plain_text?: string }> }> }
+  | { type: "incomplete" | "unsupported" };
+
 type PropMap = Record<string, {
   type: string;
   date?: { start?: string; end?: string | null };
@@ -17,6 +23,8 @@ type PropMap = Record<string, {
   select?: { name?: string };
   multi_select?: Array<{ name?: string }>;
   formula?: { string?: string };
+  rollup?: RollupValue;
+  relation?: Array<{ id: string }>;
 }>;
 
 export async function POST(req: NextRequest) {
@@ -71,6 +79,19 @@ export async function POST(req: NextRequest) {
           else if (gp?.type === "rich_text") group = gp.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
           else if (gp?.type === "title") group = gp.title?.map((t) => t.plain_text ?? "").join("") || undefined;
           else if (gp?.type === "formula") group = gp.formula?.string || undefined;
+          else if (gp?.type === "rollup" && gp.rollup) {
+            const r = gp.rollup;
+            if (r.type === "number" && r.number != null) group = String(r.number);
+            else if (r.type === "array" && r.array?.length > 0) {
+              const first = r.array[0];
+              if (first.type === "select") group = first.select?.name;
+              else if (first.type === "multi_select") group = first.multi_select?.[0]?.name;
+              else if (first.type === "rich_text") group = first.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
+            }
+          } else if (gp?.type === "relation") {
+            const rel = gp.relation;
+            if (rel && rel.length > 0) group = `${rel.length}개 연결됨`;
+          }
         }
 
         return {

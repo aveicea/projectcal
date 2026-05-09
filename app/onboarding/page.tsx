@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
@@ -35,6 +35,98 @@ interface Settings {
   labelColor: string;
   multiRow: boolean;
   darkMode: boolean;
+}
+
+const PICKER_PRESETS = [
+  "#FFFCF9","#B5E3F0","#FFF5F8","#F19CB6","#1E1E1E","#4A4A4A","#FFFFFF","#2D2D2D",
+  "#F8F5FF","#B97FE7","#F5FBF7","#66C497","#F5FAFF","#5FA3EE","#FFFEF5","#FCD34D",
+  "#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1",
+  "#F0F0F0","#CCCCCC","#888888","#555555","#333333","#000000","#FF6B6B","#FFD93D",
+];
+
+function ColorPickerButton({
+  value, onChange, size = 24,
+}: {
+  value: string; onChange: (v: string) => void; size?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hex, setHex] = useState(value);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setHex(value); }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        popRef.current && !popRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleOpen = useCallback(() => {
+    if (btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const popW = 208;
+      const popH = 130;
+      let left = r.left;
+      let top = r.top - popH - 8;
+      if (top < 8) top = r.bottom + 8;
+      if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+      setPos({ top, left });
+    }
+    setOpen((p) => !p);
+  }, []);
+
+  const applyHex = useCallback((v: string) => {
+    setHex(v);
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v);
+  }, [onChange]);
+
+  return (
+    <>
+      <button ref={btnRef} onClick={handleOpen}
+        style={{
+          width: size, height: size, borderRadius: "50%", background: value,
+          border: "2px solid rgba(0,0,0,0.12)", cursor: "pointer", padding: 0,
+          boxShadow: "0 2px 5px rgba(0,0,0,0.15)", flexShrink: 0,
+        }} />
+      {open && (
+        <div ref={popRef}
+          style={{
+            position: "fixed", top: pos.top, left: pos.left,
+            background: "white", border: "1px solid #e8e8e8", borderRadius: 12,
+            padding: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.15)", zIndex: 99999, width: 208,
+          }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: hex, border: "1px solid #eee", flexShrink: 0 }} />
+            <input
+              type="text" value={hex}
+              onChange={(e) => applyHex(e.target.value)}
+              style={{
+                flex: 1, padding: "4px 8px", borderRadius: 6, border: "1px solid #eee",
+                fontSize: 12, fontFamily: "monospace", outline: "none",
+              }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4 }}>
+            {PICKER_PRESETS.map((c, i) => (
+              <button key={i} onClick={() => { onChange(c); setHex(c); setOpen(false); }}
+                style={{
+                  width: 20, height: 20, borderRadius: "50%", background: c,
+                  border: hex === c ? "2px solid #555" : "1px solid rgba(0,0,0,0.12)",
+                  cursor: "pointer", padding: 0,
+                }} />
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function makePreviewProjects(multiRow: boolean): Project[] {
@@ -511,8 +603,8 @@ export default function OnboardingPage() {
                           <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{label}</div>
                           <div className="color-picker-wrapper" style={{ padding: "6px 8px" }}>
                             <span style={{ fontSize: 11, color: "#555" }}>{settings[key]}</span>
-                            <input type="color" className="color-input-circle" value={settings[key] as string} style={{ width: 24, height: 24 }}
-                              onChange={(e) => { update(key, e.target.value); if (key !== "labelColor") setSelectedTheme(""); }} />
+                            <ColorPickerButton value={settings[key] as string} size={24}
+                              onChange={(v) => { update(key, v); if (key !== "labelColor") setSelectedTheme(""); }} />
                           </div>
                         </div>
                       ))}
@@ -532,8 +624,8 @@ export default function OnboardingPage() {
                   <div className="bar-colors-grid">
                     {settings.barColors.map((color, i) => (
                       <div key={i} className="bar-color-item">
-                        <input type="color" className="bar-color-input" value={color}
-                          onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
+                        <ColorPickerButton value={color} size={24}
+                          onChange={(v) => { const next = [...settings.barColors]; next[i] = v; update("barColors", next); setSelectedTheme(""); }} />
                         <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
                       </div>
                     ))}
