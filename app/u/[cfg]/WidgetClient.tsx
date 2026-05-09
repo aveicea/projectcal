@@ -22,6 +22,7 @@ interface Config {
     labelColor: string;
     multiRow: boolean;
     darkMode: boolean;
+    weekView?: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -61,6 +62,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
           labelColor: json.labelColor ?? "#444444",
           multiRow: json.multiRow ?? false,
           darkMode: json.darkMode ?? false,
+          weekView: json.weekView ?? false,
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
