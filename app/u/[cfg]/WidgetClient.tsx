@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import CalendarWidget from "@/components/CalendarWidget";
 import { DEFAULT_BAR_COLORS } from "@/lib/calendarUtils";
 
@@ -28,50 +28,55 @@ interface Config {
   updatedAt: string;
 }
 
+function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] } {
+  let base64 = cfg.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const json = JSON.parse(new TextDecoder().decode(bytes));
+
+  const barColors = Array.isArray(json.barColors) ? json.barColors : DEFAULT_BAR_COLORS;
+  return {
+    barColors,
+    config: {
+      id: "embedded",
+      notionConfig: {
+        apiKey: json.token ?? "",
+        databaseId: json.dbId ?? "",
+        dateProperty: json.dateProp ?? "날짜",
+        titleProperty: json.titleProp ?? "제목",
+        groupProperty: json.groupProp || undefined,
+      },
+      theme: {
+        primaryColor: json.primaryColor ?? "#E8A8C0",
+        backgroundColor: json.backgroundColor ?? "#FFFFFF",
+        backgroundOpacity: json.backgroundOpacity ?? 100,
+        fontFamily: json.fontFamily ?? "Pretendard",
+        barColors,
+        labelColor: json.labelColor ?? "#444444",
+        multiRow: json.multiRow ?? false,
+        darkMode: json.darkMode ?? false,
+        weekView: json.weekView ?? false,
+      },
+      createdAt: "",
+      updatedAt: "",
+    },
+  };
+}
+
 export default function WidgetClient({ cfg }: { cfg: string }) {
-  const [config, setConfig] = useState<Config | null>(null);
-  const [barColors, setBarColors] = useState<string[]>(DEFAULT_BAR_COLORS);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
+  const [initState] = useState<{ config: Config | null; error: string | null; barColors: string[] }>(() => {
     try {
-      let base64 = cfg.replace(/-/g, "+").replace(/_/g, "/");
-      while (base64.length % 4) base64 += "=";
-      const raw = atob(base64);
-      const bytes = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-      const json = JSON.parse(new TextDecoder().decode(bytes));
-
-      if (Array.isArray(json.barColors)) setBarColors(json.barColors);
-
-      setConfig({
-        id: "embedded",
-        notionConfig: {
-          apiKey: json.token ?? "",
-          databaseId: json.dbId ?? "",
-          dateProperty: json.dateProp ?? "날짜",
-          titleProperty: json.titleProp ?? "제목",
-          groupProperty: json.groupProp || undefined,
-        },
-        theme: {
-          primaryColor: json.primaryColor ?? "#E8A8C0",
-          backgroundColor: json.backgroundColor ?? "#FFFFFF",
-          backgroundOpacity: json.backgroundOpacity ?? 100,
-          fontFamily: json.fontFamily ?? "Pretendard",
-          barColors: Array.isArray(json.barColors) ? json.barColors : DEFAULT_BAR_COLORS,
-          labelColor: json.labelColor ?? "#444444",
-          multiRow: json.multiRow ?? false,
-          darkMode: json.darkMode ?? false,
-          weekView: json.weekView ?? false,
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      const { config, barColors } = decodeWidgetConfig(cfg);
+      return { config, error: null, barColors };
     } catch (e) {
-      console.error("Config decode error:", e);
-      setError(e instanceof Error ? e.message : String(e));
+      return { config: null, error: e instanceof Error ? e.message : String(e), barColors: DEFAULT_BAR_COLORS };
     }
-  }, [cfg]);
+  });
+
+  const { config, error, barColors } = initState;
+  const darkMode = config?.theme.darkMode ?? false;
 
   if (error) {
     return (
@@ -85,8 +90,6 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
   }
 
   if (!config) return null;
-
-  const darkMode = config.theme.darkMode;
 
   return (
     <>
