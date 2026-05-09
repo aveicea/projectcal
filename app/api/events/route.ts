@@ -9,6 +9,12 @@ interface EventConfig {
   groupProp?: string;
 }
 
+type RollupValue =
+  | { type: "number"; number: number | null }
+  | { type: "date"; date: { start?: string } | null }
+  | { type: "array"; array: Array<{ type: string; select?: { name?: string }; multi_select?: Array<{ name?: string }>; rich_text?: Array<{ plain_text?: string }> }> }
+  | { type: "incomplete" | "unsupported" };
+
 type PropMap = Record<string, {
   type: string;
   date?: { start?: string; end?: string | null };
@@ -17,6 +23,8 @@ type PropMap = Record<string, {
   select?: { name?: string };
   multi_select?: Array<{ name?: string }>;
   formula?: { string?: string };
+  rollup?: RollupValue;
+  relation?: Array<{ id: string }>;
 }>;
 
 export async function POST(req: NextRequest) {
@@ -37,52 +45,98 @@ export async function POST(req: NextRequest) {
       page_size: 100,
     });
 
-    const events = response.results
-      .filter(isFullPage)
-      .map((page) => {
-        const props = page.properties as PropMap;
+    // 1차: 각 페이지의 기본 데이터와 관계형 ID 수집
+    type RawEvent = {
+      id: string; title: string; startDate: string; endDate: string;
+      pageUrl: string; group?: string; relationIds?: string[];
+    };
 
-        const titleProp = props[config.titleProp];
-        let title = "Untitled";
-        if (titleProp?.type === "title" && titleProp.title) {
-          title = titleProp.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
-        } else {
-          for (const prop of Object.values(props)) {
+    const rawEvents: RawEvent[] = [];
+
+    for (const page of response.results.filter(isFullPage)) {
+      const props = page.properties as PropMap;
+
+      const titleProp = props[config.titleProp];
+      let title = "Untitled";
+      if (titleProp?.type === "title" && titleProp.title) {
+        title = titleProp.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
+      } else {
+        for (const prop of Object.values(props)) {
+          if (prop.type === "title" && prop.title) {
+            title = prop.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
+            break;
+          }
+        }
+      }
+
+      const dateProp = props[config.dateProp];
+      if (!dateProp?.date?.start) continue;
+
+      const eventStart = dateProp.date.start.slice(0, 10);
+      const eventEnd = (dateProp.date.end ?? dateProp.date.start).slice(0, 10);
+      if (eventEnd < startDate || eventStart > endDate) continue;
+
+      let group: string | undefined;
+      let relationIds: string[] | undefined;
+
+      if (config.groupProp) {
+        const gp = props[config.groupProp];
+        if (gp?.type === "select") group = gp.select?.name;
+        else if (gp?.type === "multi_select") group = gp.multi_select?.[0]?.name;
+        else if (gp?.type === "rich_text") group = gp.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
+        else if (gp?.type === "title") group = gp.title?.map((t) => t.plain_text ?? "").join("") || undefined;
+        else if (gp?.type === "formula") group = gp.formula?.string || undefined;
+        else if (gp?.type === "rollup" && gp.rollup) {
+          const r = gp.rollup;
+          if (r.type === "number" && r.number != null) group = String(r.number);
+          else if (r.type === "array" && r.array?.length > 0) {
+            const first = r.array[0];
+            if (first.type === "select") group = first.select?.name;
+            else if (first.type === "multi_select") group = first.multi_select?.[0]?.name;
+            else if (first.type === "rich_text") group = first.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
+          }
+        } else if (gp?.type === "relation" && gp.relation && gp.relation.length > 0) {
+          relationIds = gp.relation.map((r) => r.id);
+        }
+      }
+
+      rawEvents.push({
+        id: page.id, title, startDate: eventStart, endDate: eventEnd,
+        pageUrl: (page as { url?: string }).url ?? "#",
+        ...(group ? { group } : {}),
+        ...(relationIds ? { relationIds } : {}),
+      });
+    }
+
+    // 2차: 관계형 속성이 있는 경우 관련 페이지 제목 일괄 조회
+    const allRelationIds = [...new Set(rawEvents.flatMap((e) => e.relationIds ?? []))];
+    const relationTitleMap = new Map<string, string>();
+
+    if (allRelationIds.length > 0) {
+      const fetched = await Promise.allSettled(
+        allRelationIds.map((id) => notion.pages.retrieve({ page_id: id }))
+      );
+      for (let i = 0; i < allRelationIds.length; i++) {
+        const result = fetched[i];
+        if (result.status === "fulfilled" && isFullPage(result.value)) {
+          const relProps = result.value.properties as PropMap;
+          for (const prop of Object.values(relProps)) {
             if (prop.type === "title" && prop.title) {
-              title = prop.title.map((t) => t.plain_text ?? "").join("") || "Untitled";
-              break;
+              const name = prop.title.map((t) => t.plain_text ?? "").join("").trim();
+              if (name) { relationTitleMap.set(allRelationIds[i], name); break; }
             }
           }
         }
+      }
+    }
 
-        const dateProp = props[config.dateProp];
-        if (!dateProp?.date?.start) return null;
-
-        const eventStart = dateProp.date.start.slice(0, 10);
-        const eventEnd = (dateProp.date.end ?? dateProp.date.start).slice(0, 10);
-
-        if (eventEnd < startDate || eventStart > endDate) return null;
-
-        let group: string | undefined;
-        if (config.groupProp) {
-          const gp = props[config.groupProp];
-          if (gp?.type === "select") group = gp.select?.name;
-          else if (gp?.type === "multi_select") group = gp.multi_select?.[0]?.name;
-          else if (gp?.type === "rich_text") group = gp.rich_text?.map((t) => t.plain_text ?? "").join("") || undefined;
-          else if (gp?.type === "title") group = gp.title?.map((t) => t.plain_text ?? "").join("") || undefined;
-          else if (gp?.type === "formula") group = gp.formula?.string || undefined;
-        }
-
-        return {
-          id: page.id,
-          title,
-          startDate: eventStart,
-          endDate: eventEnd,
-          pageUrl: (page as { url?: string }).url ?? "#",
-          ...(group ? { group } : {}),
-        };
-      })
-      .filter(Boolean);
+    const events = rawEvents.map(({ relationIds, ...ev }) => {
+      if (relationIds && relationIds.length > 0) {
+        const names = relationIds.map((id) => relationTitleMap.get(id)).filter(Boolean);
+        return { ...ev, ...(names.length > 0 ? { group: names.join(", ") } : {}) };
+      }
+      return ev;
+    });
 
     return NextResponse.json({ success: true, data: events });
   } catch (e) {
