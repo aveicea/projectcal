@@ -17,6 +17,8 @@ import {
   truncateTitle,
   getFontFamily,
   formatDate,
+  addDays,
+  daysBetween,
 } from "@/lib/calendarUtils";
 
 interface CalendarConfig {
@@ -79,11 +81,14 @@ export default function CalendarWidget({
   const [error, setError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ type: string; projectId?: string; row?: number } | null>(null);
   const [rowOverrides, setRowOverrides] = useState<Map<string, number>>(new Map());
+  const [dateOverrides, setDateOverrides] = useState<Map<string, { startDate: string; endDate: string }>>(new Map());
+  const [dropDateStr, setDropDateStr] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, text: "", color: "" });
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
+  const dragGrabDate = useRef<string | null>(null);
+  const dragMode = useRef<"move" | "resize-start" | "resize-end" | null>(null);
 
   const primaryColor = theme?.primaryColor ?? "#E8A8C0";
   const backgroundOpacity = theme?.backgroundOpacity ?? 100;
@@ -112,7 +117,6 @@ export default function CalendarWidget({
   );
   const allDays = [...prevDays, ...currDays, ...nextDays];
 
-  // Week view: prev week + curr week + next week (3 weeks total, like month view's 3 months)
   const weekStartDate = weekStartStr ? new Date(weekStartStr + "T00:00:00") : new Date();
   const prevWeekStart = new Date(weekStartDate); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
   const nextWeekStart = new Date(weekStartDate); nextWeekStart.setDate(nextWeekStart.getDate() + 7);
@@ -131,9 +135,7 @@ export default function CalendarWidget({
     ? allWeekDays[allWeekDays.length - 1].dateStr
     : formatDate(new Date(year, month + 2, 0));
 
-  useEffect(() => {
-    scrolledRef.current = false;
-  }, [year, month, weekStartStr]);
+  useEffect(() => { scrolledRef.current = false; }, [year, month, weekStartStr]);
 
   useEffect(() => {
     if (!loading && !scrolledRef.current && bodyRef.current) {
@@ -162,7 +164,6 @@ export default function CalendarWidget({
 
   const fetchProjects = useCallback(async () => {
     if (centerYear === null || centerMonth === null) return;
-
     setLoading(true);
     setError(null);
 
@@ -229,7 +230,13 @@ export default function CalendarWidget({
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
 
-  const rowMap = assignRows(projects, multiRow);
+  // Apply local date overrides on top of Notion data
+  const effectiveProjects = projects.map(p => {
+    const o = dateOverrides.get(p.id);
+    return o ? { ...p, ...o } : p;
+  });
+
+  const rowMap = assignRows(effectiveProjects, multiRow);
   const effectiveRowMap = new Map(rowMap);
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
@@ -239,36 +246,8 @@ export default function CalendarWidget({
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
   const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
 
-  const getDragId = (e: React.DragEvent) =>
-    dragId || e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain");
-
-  const getTargetRow = (e: React.DragEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return Math.max(0, Math.min(totalRows - 1, Math.floor((e.clientY - rect.top) / ROW_HEIGHT)));
-  };
-
-  const handleSwap = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const sourceId = getDragId(e);
-    if (!sourceId || sourceId === targetId) { setDragId(null); setDropTarget(null); return; }
-    const sourceRow = effectiveRowMap.get(sourceId);
-    const targetRow = effectiveRowMap.get(targetId);
-    if (sourceRow === undefined || targetRow === undefined || sourceRow === targetRow) {
-      setDragId(null); setDropTarget(null); return;
-    }
-    setRowOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(sourceId, targetRow);
-      next.set(targetId, sourceRow);
-      return next;
-    });
-    setDragId(null);
-    setDropTarget(null);
-  };
-
   function getSegmentsForDay(dateStr: string): ProjectSegment[] {
-    return projects
+    return effectiveProjects
       .filter((p) => dateStr >= p.startDate && dateStr <= p.endDate)
       .map((p) => {
         const isStart = dateStr === p.startDate;
@@ -375,6 +354,7 @@ export default function CalendarWidget({
                 const isCurrWeek = weekView
                   ? weekDays.some((d) => d.dateStr === dateStr)
                   : (day.dateObj.getMonth() === month && day.dateObj.getFullYear() === year);
+                const isColDrop = !!dragId && dropDateStr === dateStr;
 
                 return (
                   <div key={dateStr} style={{
@@ -382,6 +362,7 @@ export default function CalendarWidget({
                     width: dayWidth, flexShrink: 0,
                     opacity: isCurrWeek ? 1 : 0.55,
                   }}>
+                    {/* Date header */}
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative" }}>
                       {isMonthBoundary ? (
                         <span style={{
@@ -415,44 +396,47 @@ export default function CalendarWidget({
                       )}
                     </div>
 
+                    {/* Drop zone — handles all drag modes */}
                     <div
-                      style={{ height: `${totalRows * ROW_HEIGHT}px`, width: "100%", position: "relative" }}
+                      style={{
+                        height: `${totalRows * ROW_HEIGHT}px`, width: "100%", position: "relative",
+                        background: isColDrop ? hexToRgba(primaryColor, 0.12) : "transparent",
+                        transition: "background 0.1s",
+                        borderRadius: 4,
+                      }}
                       onDragOver={(e) => {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
-                        setDropTarget({ type: "row", row: getTargetRow(e) });
+                        setDropDateStr(dateStr);
                       }}
+                      onDragLeave={() => setDropDateStr(null)}
                       onDrop={(e) => {
-                        if (dropTarget?.type === "project" && dropTarget.projectId) {
-                          handleSwap(e, dropTarget.projectId);
-                          return;
+                        e.preventDefault();
+                        const sourceId = e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain") || dragId || "";
+                        if (!sourceId) { setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null; return; }
+                        const mode = dragMode.current;
+                        const project = effectiveProjects.find(p => p.id === sourceId);
+                        if (project) {
+                          if (mode === "move" && dragGrabDate.current) {
+                            const delta = daysBetween(dragGrabDate.current, dateStr);
+                            if (delta !== 0) {
+                              setDateOverrides(prev => { const next = new Map(prev); next.set(sourceId, { startDate: addDays(project.startDate, delta), endDate: addDays(project.endDate, delta) }); return next; });
+                              setRowOverrides(prev => { const next = new Map(prev); next.delete(sourceId); return next; });
+                            }
+                          } else if (mode === "resize-end") {
+                            const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
+                            setDateOverrides(prev => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
+                          } else if (mode === "resize-start") {
+                            const newStart = dateStr <= project.endDate ? dateStr : project.endDate;
+                            setDateOverrides(prev => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: project.endDate }); return next; });
+                          }
                         }
-                        const targetRow = getTargetRow(e);
-                        const sourceId = getDragId(e);
-                        if (!sourceId) { setDragId(null); setDropTarget(null); return; }
-                        const curRow = effectiveRowMap.get(sourceId);
-                        if (curRow === undefined || curRow === targetRow) { setDragId(null); setDropTarget(null); return; }
-                        setRowOverrides((prev) => { const next = new Map(prev); next.set(sourceId, targetRow); return next; });
-                        setDragId(null); setDropTarget(null);
+                        setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null;
                       }}
                     >
-                      {Array.from({ length: totalRows }).map((_, rowIdx) => {
-                        const active = !!dragId && dropTarget?.type === "row" && dropTarget.row === rowIdx;
-                        return (
-                          <div key={`${dateStr}-drop-${rowIdx}`} style={{
-                            position: "absolute", top: rowIdx * ROW_HEIGHT, left: 0,
-                            width: "100%", height: BAR_HEIGHT, borderRadius: 4, zIndex: 0,
-                            transition: "all .15s ease", opacity: active ? 1 : 0, pointerEvents: "none",
-                            border: active ? `2px dashed ${primaryColor}` : "none",
-                            background: active ? hexToRgba(primaryColor, 0.14) : "transparent",
-                          }} />
-                        );
-                      })}
-
                       {segments.map((seg) => {
                         const isHovered = hoveredId === seg.id;
                         const isDragging = dragId === seg.id;
-                        const isDropTarget = dropTarget?.type === "project" && dropTarget.projectId === seg.id;
                         const row = effectiveRowMap.get(seg.id) ?? 0;
                         const zIdx = isHovered ? (seg.isStart ? 210 : 200) : hoveredId ? 0 : (seg.isStart ? 2 : 1);
                         const bgC = isHovered ? seg.color : hexToRgba(seg.color, 0.55);
@@ -486,25 +470,21 @@ export default function CalendarWidget({
                               top: `${row * ROW_HEIGHT}px`,
                               ...shapeStyle,
                               ...(isDragging ? { opacity: 0.3 } : {}),
-                              ...(isDropTarget ? {
-                                boxShadow: `0 0 0 2px ${hexToRgba("#FFFFFF", 0.95)}, 0 0 0 4px ${hexToRgba(primaryColor, 0.9)}`,
-                                filter: "brightness(1.04)",
-                              } : {}),
                             }}
                             draggable
                             onDragStart={(e) => {
-                              setDragId(seg.id); setDropTarget(null);
+                              dragMode.current = "move";
+                              dragGrabDate.current = dateStr;
+                              setDragId(seg.id);
+                              setDropDateStr(null);
                               e.dataTransfer.effectAllowed = "move";
                               e.dataTransfer.setData("application/x-project-id", seg.id);
                               e.dataTransfer.setData("text/plain", seg.id);
                             }}
-                            onDragOver={(e) => {
-                              e.preventDefault(); e.stopPropagation();
-                              e.dataTransfer.dropEffect = "move";
-                              setDropTarget({ type: "project", projectId: seg.id });
+                            onDragEnd={() => {
+                              setDragId(null); setDropDateStr(null);
+                              dragMode.current = null; dragGrabDate.current = null;
                             }}
-                            onDrop={(e) => handleSwap(e, seg.id)}
-                            onDragEnd={() => { setDragId(null); setDropTarget(null); }}
                             onMouseEnter={(e) => {
                               setHoveredId(seg.id);
                               setTooltip({
@@ -521,6 +501,62 @@ export default function CalendarWidget({
                               setTooltip((t) => ({ ...t, visible: false }));
                             }}
                           >
+                            {/* Left resize handle (start) */}
+                            {seg.isStart && (
+                              <div
+                                draggable
+                                style={{
+                                  position: "absolute", left: 0, top: 0, width: 7, height: "100%",
+                                  cursor: "ew-resize", zIndex: 20,
+                                  borderTopLeftRadius: 4, borderBottomLeftRadius: 4,
+                                  background: "rgba(255,255,255,0.25)",
+                                }}
+                                onMouseDown={e => e.stopPropagation()}
+                                onDragStart={e => {
+                                  e.stopPropagation();
+                                  dragMode.current = "resize-start";
+                                  setDragId(seg.id);
+                                  setDropDateStr(null);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  e.dataTransfer.setData("application/x-project-id", seg.id);
+                                  e.dataTransfer.setData("text/plain", seg.id);
+                                }}
+                                onDragEnd={e => {
+                                  e.stopPropagation();
+                                  setDragId(null); setDropDateStr(null);
+                                  dragMode.current = null;
+                                }}
+                              />
+                            )}
+
+                            {/* Right resize handle (end) */}
+                            {seg.isEnd && (
+                              <div
+                                draggable
+                                style={{
+                                  position: "absolute", right: 0, top: 0, width: 7, height: "100%",
+                                  cursor: "ew-resize", zIndex: 20,
+                                  borderTopRightRadius: 4, borderBottomRightRadius: 4,
+                                  background: "rgba(255,255,255,0.25)",
+                                }}
+                                onMouseDown={e => e.stopPropagation()}
+                                onDragStart={e => {
+                                  e.stopPropagation();
+                                  dragMode.current = "resize-end";
+                                  setDragId(seg.id);
+                                  setDropDateStr(null);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  e.dataTransfer.setData("application/x-project-id", seg.id);
+                                  e.dataTransfer.setData("text/plain", seg.id);
+                                }}
+                                onDragEnd={e => {
+                                  e.stopPropagation();
+                                  setDragId(null); setDropDateStr(null);
+                                  dragMode.current = null;
+                                }}
+                              />
+                            )}
+
                             {showLabel && (
                               <span style={{
                                 position: "absolute", left: 2, display: "flex",
