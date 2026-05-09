@@ -112,17 +112,23 @@ export default function CalendarWidget({
   );
   const allDays = [...prevDays, ...currDays, ...nextDays];
 
-  // Week view
+  // Week view: prev week + curr week + next week (3 weeks total, like month view's 3 months)
   const weekStartDate = weekStartStr ? new Date(weekStartStr + "T00:00:00") : new Date();
-  const weekDays = weekView && weekStartStr ? getDaysInWeek(weekStartDate) : [];
+  const prevWeekStart = new Date(weekStartDate); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const nextWeekStart = new Date(weekStartDate); nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+  const prevWeekDays = weekView && weekStartStr ? getDaysInWeek(prevWeekStart) : [];
+  const weekDays     = weekView && weekStartStr ? getDaysInWeek(weekStartDate) : [];
+  const nextWeekDays = weekView && weekStartStr ? getDaysInWeek(nextWeekStart) : [];
+  const allWeekDays  = [...prevWeekDays, ...weekDays, ...nextWeekDays];
+
   const dayWidth = weekView ? WEEK_DAY_WIDTH : DAY_WIDTH;
-  const displayDays = weekView ? weekDays : allDays;
+  const displayDays = weekView ? allWeekDays : allDays;
 
   const fetchStart = weekView && weekStartStr
-    ? formatDate(new Date(weekStartDate.getFullYear(), weekStartDate.getMonth() - 1, 1))
+    ? formatDate(new Date(prevWeekStart.getFullYear(), prevWeekStart.getMonth() - 1, 1))
     : formatDate(new Date(year, month - 1, 1));
-  const fetchEnd = weekView && weekDays.length > 0
-    ? weekDays[6].dateStr
+  const fetchEnd = weekView && allWeekDays.length > 0
+    ? allWeekDays[allWeekDays.length - 1].dateStr
     : formatDate(new Date(year, month + 2, 0));
 
   useEffect(() => {
@@ -130,12 +136,14 @@ export default function CalendarWidget({
   }, [year, month, weekStartStr]);
 
   useEffect(() => {
-    if (weekView) return;
     if (!loading && !scrolledRef.current && bodyRef.current) {
-      bodyRef.current.scrollLeft = prevDays.length * DAY_WIDTH + 12;
+      const offset = weekView
+        ? prevWeekDays.length * WEEK_DAY_WIDTH + 12
+        : prevDays.length * DAY_WIDTH + 12;
+      bodyRef.current.scrollLeft = offset;
       scrolledRef.current = true;
     }
-  }, [loading, prevDays.length, weekView]);
+  }, [loading, prevDays.length, prevWeekDays.length, weekView]);
 
   const getPreviewProjects = useCallback((): Project[] => {
     const d = (monthOffset: number, day: number): string => {
@@ -301,7 +309,7 @@ export default function CalendarWidget({
         outline: darkMode ? "none" : `2px solid ${headerBg}`,
         boxShadow: darkMode ? "none" : `2px 2px 0px ${primaryColor}4D, 4px 4px 12px ${primaryColor}26`,
         borderRadius: 10, overflow: "hidden", userSelect: "none",
-        width: weekView ? "100%" : "fit-content", maxWidth: "98vw",
+        width: "fit-content", maxWidth: "98vw",
         display: "flex", flexDirection: "column", position: "relative",
       }}>
         <div style={{
@@ -336,14 +344,14 @@ export default function CalendarWidget({
         ) : (
           <div
             ref={bodyRef}
-            onWheel={(e) => { if (!weekView && bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
+            onWheel={(e) => { if (bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
             style={{
-              padding: "10px 0 18px", overflowX: weekView ? "hidden" : "auto",
-              display: "flex", background: bgColor, width: weekView ? "100%" : undefined,
+              padding: "10px 0 18px", overflowX: "auto",
+              display: "flex", background: bgColor,
               scrollbarWidth: "thin", scrollbarColor: `${primaryColor}40 transparent`,
             }}
           >
-            <div style={{ display: weekView ? "grid" : "flex", gridTemplateColumns: weekView ? `repeat(7, 1fr)` : undefined, padding: "0 12px", minWidth: weekView ? undefined : "min-content", width: weekView ? "100%" : undefined }}>
+            <div style={{ display: "flex", padding: "0 12px", minWidth: "min-content" }}>
               {displayDays.map((day) => {
                 const { dateStr } = day;
                 const isMonthBoundary = day.day === 1;
@@ -351,15 +359,15 @@ export default function CalendarWidget({
                 const dow = day.dateObj.getDay();
                 const isWeekend = dow === 0 || dow === 6;
                 const isToday = todayStr === day.dateObj.toDateString();
-                const isCenterMonth = weekView
-                  ? true
+                const isCurrWeek = weekView
+                  ? weekDays.some((d) => d.dateStr === dateStr)
                   : (day.dateObj.getMonth() === month && day.dateObj.getFullYear() === year);
 
                 return (
                   <div key={dateStr} style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
-                    width: weekView ? undefined : DAY_WIDTH, flexShrink: weekView ? undefined : 0,
-                    opacity: isCenterMonth ? 1 : 0.55,
+                    width: dayWidth, flexShrink: 0,
+                    opacity: isCurrWeek ? 1 : 0.55,
                   }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative" }}>
                       {isMonthBoundary ? (
