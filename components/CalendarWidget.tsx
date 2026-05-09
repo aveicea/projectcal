@@ -7,6 +7,8 @@ import {
   ProjectSegment,
   DEFAULT_BAR_COLORS,
   getDaysInMonth,
+  getDaysInWeek,
+  getWeekStart,
   assignRows,
   assignColors,
   hexToRgba,
@@ -36,6 +38,7 @@ interface CalendarTheme {
   labelColor: string;
   multiRow: boolean;
   darkMode: boolean;
+  weekView?: boolean;
 }
 
 interface CalendarWidgetProps {
@@ -47,6 +50,7 @@ interface CalendarWidgetProps {
 }
 
 const DAY_WIDTH = 25;
+const WEEK_DAY_WIDTH = 80;
 const ROW_HEIGHT = 26;
 const BAR_HEIGHT = 22;
 
@@ -60,12 +64,14 @@ export default function CalendarWidget({
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
   const [todayStr, setTodayStr] = useState<string>("");
+  const [weekStartStr, setWeekStartStr] = useState<string>("");
 
   useEffect(() => {
     const now = new Date();
     setCenterYear(now.getFullYear());
     setCenterMonth(now.getMonth());
     setTodayStr(now.toDateString());
+    setWeekStartStr(formatDate(getWeekStart(now)));
   }, []);
 
   const [projects, setProjects] = useState<ProjectSegment[]>([]);
@@ -86,6 +92,7 @@ export default function CalendarWidget({
   const labelColor = theme?.labelColor ?? "#444444";
   const multiRow = theme?.multiRow ?? false;
   const darkMode = theme?.darkMode ?? false;
+  const weekView = theme?.weekView ?? false;
 
   const bgColor = rawBg.startsWith("rgba") ? rawBg : hexToRgbaBackground(rawBg, backgroundOpacity);
   const headerBg = lightenColor(primaryColor, 0.85);
@@ -105,19 +112,30 @@ export default function CalendarWidget({
   );
   const allDays = [...prevDays, ...currDays, ...nextDays];
 
-  const fetchStart = formatDate(new Date(year, month - 1, 1));
-  const fetchEnd = formatDate(new Date(year, month + 2, 0));
+  // Week view
+  const weekStartDate = weekStartStr ? new Date(weekStartStr + "T00:00:00") : new Date();
+  const weekDays = weekView && weekStartStr ? getDaysInWeek(weekStartDate) : [];
+  const dayWidth = weekView ? WEEK_DAY_WIDTH : DAY_WIDTH;
+  const displayDays = weekView ? weekDays : allDays;
+
+  const fetchStart = weekView && weekStartStr
+    ? formatDate(new Date(weekStartDate.getFullYear(), weekStartDate.getMonth() - 1, 1))
+    : formatDate(new Date(year, month - 1, 1));
+  const fetchEnd = weekView && weekDays.length > 0
+    ? weekDays[6].dateStr
+    : formatDate(new Date(year, month + 2, 0));
 
   useEffect(() => {
     scrolledRef.current = false;
-  }, [year, month]);
+  }, [year, month, weekStartStr]);
 
   useEffect(() => {
+    if (weekView) return;
     if (!loading && !scrolledRef.current && bodyRef.current) {
       bodyRef.current.scrollLeft = prevDays.length * DAY_WIDTH + 12;
       scrolledRef.current = true;
     }
-  }, [loading, prevDays.length]);
+  }, [loading, prevDays.length, weekView]);
 
   const getPreviewProjects = useCallback((): Project[] => {
     const d = (monthOffset: number, day: number): string => {
@@ -188,6 +206,16 @@ export default function CalendarWidget({
     setRowOverrides(new Map());
   };
 
+  const navigateWeek = (delta: number) => {
+    setWeekStartStr((prev) => {
+      if (!prev) return prev;
+      const d = new Date(prev + "T00:00:00");
+      d.setDate(d.getDate() + delta * 7);
+      return formatDate(d);
+    });
+    setRowOverrides(new Map());
+  };
+
   const formatShortDate = (dateStr: string) => {
     const d = new Date(dateStr + "T00:00:00");
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -248,6 +276,18 @@ export default function CalendarWidget({
 
   const centerMonthLabel = new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+  const weekLabel = weekView && weekDays.length > 0 ? (() => {
+    const s = weekDays[0].dateObj;
+    const e = weekDays[6].dateObj;
+    const sm = s.toLocaleDateString("en-US", { month: "short" });
+    const em = e.toLocaleDateString("en-US", { month: "short" });
+    return s.getMonth() === e.getMonth()
+      ? `${sm} ${s.getDate()} – ${e.getDate()}, ${s.getFullYear()}`
+      : `${sm} ${s.getDate()} – ${em} ${e.getDate()}, ${e.getFullYear()}`;
+  })() : "";
+
+  const headerLabel = weekView ? weekLabel : centerMonthLabel;
+
   return (
     <>
       <style>{`
@@ -272,14 +312,14 @@ export default function CalendarWidget({
         }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <Link size={12} strokeWidth={2.5} />
-            {centerMonthLabel} Timeline
+            {headerLabel} Timeline
             <span style={{ display: "flex", gap: 2, alignItems: "center", marginLeft: 2 }}>
-              <button onClick={() => navigateMonth(-1)} aria-label="Previous month"
-                style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
+              <button onClick={() => weekView ? navigateWeek(-1) : navigateMonth(-1)}
+                aria-label="Previous" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
                 <ChevronLeft size={14} />
               </button>
-              <button onClick={() => navigateMonth(1)} aria-label="Next month"
-                style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
+              <button onClick={() => weekView ? navigateWeek(1) : navigateMonth(1)}
+                aria-label="Next" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
                 <ChevronRight size={14} />
               </button>
             </span>
@@ -296,27 +336,29 @@ export default function CalendarWidget({
         ) : (
           <div
             ref={bodyRef}
-            onWheel={(e) => { if (bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
+            onWheel={(e) => { if (!weekView && bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
             style={{
-              padding: "10px 0 18px", overflowX: "auto", display: "flex", background: bgColor,
+              padding: "10px 0 18px", overflowX: weekView ? "hidden" : "auto",
+              display: "flex", background: bgColor,
               scrollbarWidth: "thin", scrollbarColor: `${primaryColor}40 transparent`,
             }}
           >
-            <div style={{ display: "flex", padding: "0 12px", minWidth: "min-content" }}>
-              {allDays.map((day) => {
+            <div style={{ display: weekView ? "grid" : "flex", gridTemplateColumns: weekView ? `repeat(7, 1fr)` : undefined, padding: "0 12px", minWidth: weekView ? undefined : "min-content", width: weekView ? "100%" : undefined }}>
+              {displayDays.map((day) => {
                 const { dateStr } = day;
                 const isMonthBoundary = day.day === 1;
                 const segments = getSegmentsForDay(dateStr);
                 const dow = day.dateObj.getDay();
                 const isWeekend = dow === 0 || dow === 6;
                 const isToday = todayStr === day.dateObj.toDateString();
-                const isCenterMonth =
-                  day.dateObj.getMonth() === month && day.dateObj.getFullYear() === year;
+                const isCenterMonth = weekView
+                  ? true
+                  : (day.dateObj.getMonth() === month && day.dateObj.getFullYear() === year);
 
                 return (
                   <div key={dateStr} style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
-                    width: DAY_WIDTH, flexShrink: 0,
+                    width: weekView ? undefined : DAY_WIDTH, flexShrink: weekView ? undefined : 0,
                     opacity: isCenterMonth ? 1 : 0.55,
                   }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative" }}>
@@ -332,15 +374,16 @@ export default function CalendarWidget({
                         <span style={{ height: 9, display: "block" }} />
                       )}
                       <span style={{
-                        fontSize: 8, color: isWeekend ? primaryColor : "#bbb",
+                        fontSize: weekView ? 10 : 8, color: isWeekend ? primaryColor : "#bbb",
                         textTransform: "uppercase", lineHeight: 1, marginBottom: 1,
                       }}>
                         {day.dayName}
                       </span>
                       <span style={{
-                        fontSize: 10, fontWeight: 600,
+                        fontSize: weekView ? 13 : 10, fontWeight: 600,
                         color: isToday ? "white" : isWeekend ? primaryColor : "#555",
-                        width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                        width: weekView ? 22 : 16, height: weekView ? 22 : 16,
+                        display: "flex", alignItems: "center", justifyContent: "center",
                         borderRadius: "50%",
                         background: isToday ? primaryColor : isWeekend ? headerBg : "transparent",
                       }}>
@@ -464,10 +507,10 @@ export default function CalendarWidget({
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 pointerEvents: "none", fontSize: 9, color: labelColor,
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
-                                width: `${Math.max(DAY_WIDTH * Math.max(labelDuration, 1) - 4, 21)}px`,
+                                width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
                               }}>
-                                {truncateTitle(seg.title, Math.max(labelDuration, 1))}
+                                {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
                               </span>
                             )}
                           </div>

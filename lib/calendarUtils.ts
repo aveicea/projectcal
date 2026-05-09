@@ -245,10 +245,31 @@ export function hexToRgbaBackground(hex: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${opacity / 100})`;
 }
 
-export function truncateTitle(title: string, duration: number): string {
-  const maxChars = Math.max(4, Math.floor(Math.max(25 * duration - 12, 10) / 6));
+export function truncateTitle(title: string, duration: number, dayWidth = 25): string {
+  const maxChars = Math.max(4, Math.floor(Math.max(dayWidth * duration - 12, 10) / 6));
   if (title.length <= maxChars) return title;
   return `${title.slice(0, Math.max(1, maxChars - 3))}...`;
+}
+
+export function getWeekStart(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); // Monday
+  return d;
+}
+
+export function getDaysInWeek(weekStartDate: Date): DayInfo[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const dateObj = new Date(weekStartDate);
+    dateObj.setDate(weekStartDate.getDate() + i);
+    return {
+      dateObj,
+      day: dateObj.getDate(),
+      dateStr: formatDate(dateObj),
+      dayName: dateObj.toLocaleDateString("en-US", { weekday: "short" }),
+    };
+  });
 }
 
 export function getFontFamily(fontFamily: string): string {

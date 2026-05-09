@@ -35,6 +35,7 @@ interface Settings {
   labelColor: string;
   multiRow: boolean;
   darkMode: boolean;
+  weekView: boolean;
 }
 
 function makePreviewProjects(multiRow: boolean): Project[] {
@@ -84,6 +85,7 @@ export default function OnboardingPage() {
     labelColor: "#444444",
     multiRow: false,
     darkMode: false,
+    weekView: false,
   });
 
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -163,6 +165,7 @@ export default function OnboardingPage() {
         labelColor: settings.labelColor,
         multiRow: settings.multiRow,
         darkMode: settings.darkMode,
+        weekView: settings.weekView,
       };
       const encoded = btoa(
         Array.from(new TextEncoder().encode(JSON.stringify(cfg)))
@@ -187,6 +190,7 @@ export default function OnboardingPage() {
     labelColor: settings.labelColor,
     multiRow: settings.multiRow,
     darkMode: settings.darkMode,
+    weekView: settings.weekView,
   };
 
   return (
@@ -493,6 +497,14 @@ export default function OnboardingPage() {
                           {settings.darkMode && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
                         </div>
                         다크모드
+                      </label>
+                    </div>
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #eee" }}>
+                      <label onClick={() => update("weekView", !settings.weekView)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: settings.weekView ? "#333" : "#999", fontWeight: settings.weekView ? 600 : 400 }}>
+                        <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.weekView ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.weekView ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
+                          {settings.weekView && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
+                        </div>
+                        주별 보기
                       </label>
                     </div>
                   </div>
