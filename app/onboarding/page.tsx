@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState } from "react";
 import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
@@ -11,7 +11,7 @@ const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
 });
 
 const THEMES = [
-  { name: "파스텔�", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
+  { name: "파스텔🌸", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
   { name: "핑크",    colors: { background: "#FFF5F8", primary: "#F19CB6", barColors: ["#FFB3BA","#FFDBE7","#FFD1DC","#F8C8DC","#FF9EC1","#FFC4D6","#FF85A2","#FFE4ED"] } },
   { name: "블랙",    colors: { background: "#1E1E1E", primary: "#4A4A4A", barColors: ["#6B7280","#9CA3AF","#D1D5DB","#E5E7EB","#F3F4F6","#8B5CF6","#EC4899","#F97316"] } },
   { name: "화이트",  colors: { background: "#FFFFFF", primary: "#2D2D2D", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
@@ -35,98 +35,6 @@ interface Settings {
   labelColor: string;
   multiRow: boolean;
   darkMode: boolean;
-}
-
-const PICKER_PRESETS = [
-  "#FFFCF9","#B5E3F0","#FFF5F8","#F19CB6","#1E1E1E","#4A4A4A","#FFFFFF","#2D2D2D",
-  "#F8F5FF","#B97FE7","#F5FBF7","#66C497","#F5FAFF","#5FA3EE","#FFFEF5","#FCD34D",
-  "#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1",
-  "#F0F0F0","#CCCCCC","#888888","#555555","#333333","#000000","#FF6B6B","#FFD93D",
-];
-
-function ColorPickerButton({
-  value, onChange, size = 24,
-}: {
-  value: string; onChange: (v: string) => void; size?: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hex, setHex] = useState(value);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { setHex(value); }, [value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        popRef.current && !popRef.current.contains(e.target as Node) &&
-        btnRef.current && !btnRef.current.contains(e.target as Node)
-      ) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const handleOpen = useCallback(() => {
-    if (btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const popW = 208;
-      const popH = 130;
-      let left = r.left;
-      let top = r.top - popH - 8;
-      if (top < 8) top = r.bottom + 8;
-      if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
-      setPos({ top, left });
-    }
-    setOpen((p) => !p);
-  }, []);
-
-  const applyHex = useCallback((v: string) => {
-    setHex(v);
-    if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v);
-  }, [onChange]);
-
-  return (
-    <>
-      <button ref={btnRef} onClick={handleOpen}
-        style={{
-          width: size, height: size, borderRadius: "50%", background: value,
-          border: "2px solid rgba(0,0,0,0.12)", cursor: "pointer", padding: 0,
-          boxShadow: "0 2px 5px rgba(0,0,0,0.15)", flexShrink: 0,
-        }} />
-      {open && (
-        <div ref={popRef}
-          style={{
-            position: "fixed", top: pos.top, left: pos.left,
-            background: "white", border: "1px solid #e8e8e8", borderRadius: 12,
-            padding: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.15)", zIndex: 99999, width: 208,
-          }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: hex, border: "1px solid #eee", flexShrink: 0 }} />
-            <input
-              type="text" value={hex}
-              onChange={(e) => applyHex(e.target.value)}
-              style={{
-                flex: 1, padding: "4px 8px", borderRadius: 6, border: "1px solid #eee",
-                fontSize: 12, fontFamily: "monospace", outline: "none",
-              }} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 4 }}>
-            {PICKER_PRESETS.map((c, i) => (
-              <button key={i} onClick={() => { onChange(c); setHex(c); setOpen(false); }}
-                style={{
-                  width: 20, height: 20, borderRadius: "50%", background: c,
-                  border: hex === c ? "2px solid #555" : "1px solid rgba(0,0,0,0.12)",
-                  cursor: "pointer", padding: 0,
-                }} />
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
 }
 
 function makePreviewProjects(multiRow: boolean): Project[] {
@@ -159,7 +67,7 @@ export default function OnboardingPage() {
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
   const [selectedDbName, setSelectedDbName] = useState("");
-  const [selectedTheme, setSelectedTheme] = useState("파스텔�");
+  const [selectedTheme, setSelectedTheme] = useState("파스텔🌸");
   const [generatedUrl, setGeneratedUrl] = useState("");
 
   const [settings, setSettings] = useState<Settings>({
@@ -452,6 +360,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* Step 1: API 키 입력 + 데이터베이스 선택 */}
           {step === 1 && (
             <div style={{ animation: "fadeIn 0.5s" }}>
               <div style={{ textAlign: "center", marginBottom: 40 }}>
@@ -488,58 +397,64 @@ export default function OnboardingPage() {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-              {settings.databaseId && !loading && (
-                <div style={{ marginTop: 36, animation: "fadeIn 0.5s", maxWidth: 480, margin: "36px auto 0" }}>
-                  <div style={{ background: "#FFF8FB", border: "1px solid #F0D0DA", borderRadius: 16, padding: "24px 28px" }}>
-                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 20, color: "#555", display: "flex", alignItems: "center", gap: 8 }}>
-                      <CalendarDays size={16} color="#E8A8C0" /> {selectedDbName} — 속성 설정
-                    </h3>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                      <div>
-                        <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>날짜 속성</label>
-                        <input className="soft-input" value={settings.dateProperty}
-                          onChange={(e) => update("dateProperty", e.target.value)}
-                          style={{ marginBottom: 0, fontSize: 13 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>제목 속성</label>
-                        <input className="soft-input" value={settings.titleProperty}
-                          onChange={(e) => update("titleProperty", e.target.value)}
-                          style={{ marginBottom: 0, fontSize: 13 }} />
-                      </div>
+                  {settings.databaseId && !loading && (
+                    <div style={{ marginTop: 28, display: "flex", justifyContent: "center", animation: "fadeIn 0.4s" }}>
+                      <button className="soft-btn" onClick={() => setStep(2)} style={{ padding: "14px 48px" }}>
+                        다음: 디자인 설정 →
+                      </button>
                     </div>
-                    <div style={{ marginBottom: 24 }}>
-                      <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>그룹 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(선택)</span></label>
-                      {groupableProperties.length > 0 ? (
-                        <select className="soft-select" value={settings.groupProperty}
-                          onChange={(e) => update("groupProperty", e.target.value)}
-                          style={{ marginBottom: 0 }}>
-                          <option value="">— 없음 —</option>
-                          {groupableProperties.map((p) => (
-                            <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input className="soft-input" value={settings.groupProperty}
-                          onChange={(e) => update("groupProperty", e.target.value)}
-                          placeholder="예: 팀, 카테고리"
-                          style={{ marginBottom: 0 }} />
-                      )}
-                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 5 }}>같은 속성값끼리 같은 행에 묶어서 표시</div>
-                    </div>
-                    <button className="soft-btn" onClick={() => setStep(2)} style={{ width: "100%" }}>
-                      다음: 디자인 설정 →
-                    </button>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
+          {/* Step 2: 속성 설정 + 디자인 */}
           {step === 2 && (
-            <div style={{ animation: "fadeIn 0.5s", display: "flex", flexDirection: "column", gap: 32, alignItems: "center" }}>
+            <div style={{ animation: "fadeIn 0.5s", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
+
+              {/* 속성 설정 (Step 1에서 이동) */}
+              <div style={{ width: "100%", background: "#FFF8FB", border: "1px solid #F0D0DA", borderRadius: 16, padding: "20px 24px" }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: "#555", display: "flex", alignItems: "center", gap: 8 }}>
+                  <CalendarDays size={15} color="#E8A8C0" /> {selectedDbName} — 속성 설정
+                </h3>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>날짜 속성</label>
+                    <input className="soft-input" value={settings.dateProperty}
+                      onChange={(e) => update("dateProperty", e.target.value)}
+                      style={{ marginBottom: 0, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>제목 속성</label>
+                    <input className="soft-input" value={settings.titleProperty}
+                      onChange={(e) => update("titleProperty", e.target.value)}
+                      style={{ marginBottom: 0, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                      그룹 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(선택)</span>
+                    </label>
+                    {groupableProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.groupProperty}
+                        onChange={(e) => update("groupProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        <option value="">— 없음 —</option>
+                        {groupableProperties.map((p) => (
+                          <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.groupProperty}
+                        onChange={(e) => update("groupProperty", e.target.value)}
+                        placeholder="예: 팀, 카테고리"
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 라이브 프리뷰 */}
               <div style={{ background: "#F7F8FA", padding: "24px 20px", borderRadius: 20, border: "1px solid #eee", width: "100%" }}>
                 <div style={{ textAlign: "center", marginBottom: 16, fontSize: 14, color: "#888", fontWeight: 600 }}>LIVE PREVIEW</div>
                 <div style={{ background: settings.darkMode ? "#191919" : "white", borderRadius: 8, overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", display: "flex", justifyContent: "center" }}>
@@ -548,6 +463,8 @@ export default function OnboardingPage() {
                   </div>
                 </div>
               </div>
+
+              {/* 디자인 설정 */}
               <div style={{ width: "100%" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 28, marginBottom: 28 }}>
                   <div style={{ background: "#F9F9F9", padding: "16px 18px", borderRadius: 16, minWidth: 140 }}>
@@ -567,7 +484,7 @@ export default function OnboardingPage() {
                         <div style={{ width: 18, height: 18, borderRadius: 4, border: settings.multiRow ? "2px solid #E8A8C0" : "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", background: settings.multiRow ? "#E8A8C0" : "transparent", flexShrink: 0 }}>
                           {settings.multiRow && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
                         </div>
-                        겨침 2단
+                        겹침 2단
                       </label>
                     </div>
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #eee" }}>
@@ -603,8 +520,8 @@ export default function OnboardingPage() {
                           <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{label}</div>
                           <div className="color-picker-wrapper" style={{ padding: "6px 8px" }}>
                             <span style={{ fontSize: 11, color: "#555" }}>{settings[key]}</span>
-                            <ColorPickerButton value={settings[key] as string} size={24}
-                              onChange={(v) => { update(key, v); if (key !== "labelColor") setSelectedTheme(""); }} />
+                            <input type="color" className="color-input-circle" value={settings[key] as string} style={{ width: 24, height: 24 }}
+                              onChange={(e) => { update(key, e.target.value); if (key !== "labelColor") setSelectedTheme(""); }} />
                           </div>
                         </div>
                       ))}
@@ -624,8 +541,8 @@ export default function OnboardingPage() {
                   <div className="bar-colors-grid">
                     {settings.barColors.map((color, i) => (
                       <div key={i} className="bar-color-item">
-                        <ColorPickerButton value={color} size={24}
-                          onChange={(v) => { const next = [...settings.barColors]; next[i] = v; update("barColors", next); setSelectedTheme(""); }} />
+                        <input type="color" className="bar-color-input" value={color}
+                          onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
                         <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
                       </div>
                     ))}
@@ -644,7 +561,7 @@ export default function OnboardingPage() {
           {generating && (
             <div style={{ textAlign: "center", padding: "60px 0", animation: "fadeIn 0.5s" }}>
               <div style={{ fontSize: 50, marginBottom: 30, display: "inline-block", animation: "spin 2s linear infinite" }}>💿</div>
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>위젯을 괽고 있습니다...</h3>
+              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 10 }}>위젯을 굽고 있습니다...</h3>
               <p style={{ color: "#888", fontSize: 15 }}>잠시만 기다려주세요.</p>
             </div>
           )}
