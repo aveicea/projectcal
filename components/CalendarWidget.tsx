@@ -338,7 +338,7 @@ export default function CalendarWidget({
             ref={bodyRef}
             onWheel={(e) => { if (bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
             style={{
-              padding: "10px 0 18px", overflowX: "auto",
+              padding: "10px 0 18px", overflowX: "auto", overflowY: "hidden",
               display: "flex", background: bgColor,
               scrollbarWidth: "thin", scrollbarColor: `${primaryColor}40 transparent`,
             }}
