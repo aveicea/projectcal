@@ -128,6 +128,8 @@ export default function CalendarWidget({
   const [gcalUpdatingId, setGcalUpdatingId] = useState<string | null>(null);
   // Notion IDs that have a corresponding event in GCal → hide the Notion bar
   const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
+  // Whether to include timed events (not just all-day events)
+  const [gcalShowTimed, setGcalShowTimed] = useState(false);
 
   // Load token + synced IDs from localStorage
   useEffect(() => {
@@ -141,6 +143,8 @@ export default function CalendarWidget({
     if (synced) {
       try { setSyncedIds(new Set(JSON.parse(synced))); } catch { /* ignore */ }
     }
+    const showTimed = localStorage.getItem("pcal_gcal_show_timed");
+    if (showTimed === "true") setGcalShowTimed(true);
   }, []);
 
   // Fetch calendar list when token changes
@@ -273,7 +277,12 @@ export default function CalendarWidget({
           if (!Array.isArray(data.items)) return [];
           const calColor = colorMap.get(calId) || GCAL_DEFAULT_COLOR;
           return (data.items as GCalEventRaw[])
-            .filter((e) => e.start.date || e.start.dateTime)
+            .filter((e) => {
+              if (!e.start.date && !e.start.dateTime) return false;
+              // Timed events (not all-day) — only include if user opted in
+              if (!gcalShowTimed && e.start.dateTime) return false;
+              return true;
+            })
             .map((e) => {
               const startDate = e.start.date || e.start.dateTime!.slice(0, 10);
               let endDate = e.end.date
@@ -323,7 +332,7 @@ export default function CalendarWidget({
       });
 
     return () => { cancelled = true; };
-  }, [gcalToken, selectedCalendarIds, gcalCalendars, fetchStart, fetchEnd]);
+  }, [gcalToken, selectedCalendarIds, gcalCalendars, fetchStart, fetchEnd, gcalShowTimed]);
 
   // ── GCal functions ────────────────────────────────────────────────────────
 
@@ -790,6 +799,32 @@ export default function CalendarWidget({
                 })}
               </div>
             )}
+
+            {/* Timed events toggle */}
+            <div style={{ padding: "6px 12px", borderTop: `1px solid ${primaryColor}20` }}>
+              <label
+                onClick={() => {
+                  const next = !gcalShowTimed;
+                  setGcalShowTimed(next);
+                  localStorage.setItem("pcal_gcal_show_timed", String(next));
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0" }}
+              >
+                <div style={{
+                  width: 28, height: 16, borderRadius: 8, flexShrink: 0, position: "relative",
+                  background: gcalShowTimed ? "#4285F4" : "#ccc", transition: "background 0.2s",
+                }}>
+                  <div style={{
+                    position: "absolute", top: 2, left: gcalShowTimed ? 14 : 2,
+                    width: 12, height: 12, borderRadius: "50%", background: "white",
+                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                  }} />
+                </div>
+                <span style={{ fontSize: 10, color: darkMode ? "#ccc" : "#555", fontWeight: 600 }}>
+                  시간 지정 일정 포함
+                </span>
+              </label>
+            </div>
 
             {/* Disconnect button */}
             <div style={{ padding: "8px 12px", borderTop: `1px solid ${primaryColor}20` }}>
