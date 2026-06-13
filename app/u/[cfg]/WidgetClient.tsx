@@ -112,6 +112,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         config={config}
         theme={{ ...config.theme, barColors }}
         fontFamily={config.theme.fontFamily}
+        initialGcalCalendarIds={config.gcalCalendarIds}
       />
     </>
   );

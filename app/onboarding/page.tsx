@@ -85,6 +85,44 @@ export default function OnboardingPage() {
   const [gcalSelectedIds, setGcalSelectedIds] = useState<Set<string>>(new Set());
   const [gcalLoading, setGcalLoading] = useState(false);
 
+  const [importUrl, setImportUrl] = useState("");
+
+  const handleImportUrl = () => {
+    try {
+      const trimmed = importUrl.trim();
+      const cfgPart = trimmed.includes("/u/") ? trimmed.split("/u/")[1].split("?")[0] : trimmed;
+      if (!cfgPart) throw new Error("Invalid URL");
+      let base64 = cfgPart.replace(/-/g, "+").replace(/_/g, "/");
+      while (base64.length % 4) base64 += "=";
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const json = JSON.parse(new TextDecoder().decode(bytes));
+
+      setSettings((prev) => ({
+        ...prev,
+        apiKey: json.token ?? prev.apiKey,
+        databaseId: json.dbId ?? prev.databaseId,
+        dateProperty: json.dateProp ?? prev.dateProperty,
+        titleProperty: json.titleProp ?? prev.titleProperty,
+        groupProperty: json.groupProp ?? prev.groupProperty,
+        primaryColor: json.primaryColor ?? prev.primaryColor,
+        backgroundColor: json.backgroundColor ?? prev.backgroundColor,
+        backgroundOpacity: json.backgroundOpacity ?? prev.backgroundOpacity,
+        fontFamily: json.fontFamily ?? prev.fontFamily,
+        barColors: Array.isArray(json.barColors) ? json.barColors : prev.barColors,
+        labelColor: json.labelColor ?? prev.labelColor,
+        multiRow: json.multiRow ?? prev.multiRow,
+        darkMode: json.darkMode ?? prev.darkMode,
+        weekView: json.weekView ?? prev.weekView,
+      }));
+      setImportUrl("");
+      setErrorMsg(null);
+    } catch {
+      setErrorMsg("올바른 위젯 URL이 아닙니다.");
+    }
+  };
+
   const [settings, setSettings] = useState<Settings>({
     databaseId: "",
     apiKey: "",
@@ -473,6 +511,23 @@ export default function OnboardingPage() {
                 <h2 style={{ fontSize: 24, marginBottom: 12, fontWeight: 700 }}>Notion 연결하기</h2>
                 <p style={{ color: "#888", fontSize: 15 }}>Integration 토큰을 사용하여 데이터베이스를 불러옵니다.</p>
               </div>
+              <div style={{ maxWidth: 450, margin: "0 auto 28px" }}>
+                <label style={{ display: "block", marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#888" }}>기존 위젯 URL로 설정 불러오기</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="soft-input" value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="https://...projectcal.../u/..." style={{ marginBottom: 0, fontSize: 13 }} />
+                  <button className="soft-btn secondary" onClick={handleImportUrl} disabled={!importUrl.trim()} style={{ whiteSpace: "nowrap", fontSize: 13, padding: "0 16px" }}>
+                    불러오기
+                  </button>
+                </div>
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 1, background: "#eee" }} />
+                  <span style={{ fontSize: 12, color: "#bbb" }}>또는 직접 입력</span>
+                  <div style={{ flex: 1, height: 1, background: "#eee" }} />
+                </div>
+              </div>
+
               <div style={{ maxWidth: 450, margin: "0 auto" }}>
                 <label style={{ display: "block", marginBottom: 10, fontWeight: 600, fontSize: 14, color: "#555" }}>API TOKEN</label>
                 <div style={{ display: "flex", gap: 10 }}>

@@ -74,6 +74,7 @@ interface CalendarWidgetProps {
   theme?: CalendarTheme;
   fontFamily?: string;
   previewProjects?: Project[];
+  initialGcalCalendarIds?: string[];
 }
 
 const DAY_WIDTH = 25;
@@ -88,6 +89,7 @@ export default function CalendarWidget({
   theme,
   fontFamily = "Pretendard",
   previewProjects,
+  initialGcalCalendarIds,
 }: CalendarWidgetProps) {
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
@@ -174,6 +176,9 @@ export default function CalendarWidget({
             } catch {
               setSelectedCalendarIds(new Set(cals.map((c) => c.id)));
             }
+          } else if (initialGcalCalendarIds && initialGcalCalendarIds.length > 0) {
+            const initial = new Set(cals.map((c) => c.id).filter((id) => initialGcalCalendarIds.includes(id)));
+            setSelectedCalendarIds(initial.size > 0 ? initial : new Set(cals.map((c) => c.id)));
           } else {
             setSelectedCalendarIds(new Set(cals.map((c) => c.id)));
           }
@@ -685,8 +690,8 @@ export default function CalendarWidget({
                   fontWeight: 700,
                   letterSpacing: 0.3,
                   color: gcalToken ? "white" : primaryColor,
-                  background: gcalToken ? GCAL_DEFAULT_COLOR : "transparent",
-                  border: `1px solid ${gcalToken ? GCAL_DEFAULT_COLOR : primaryColor}`,
+                  background: gcalToken ? primaryColor : "transparent",
+                  border: `1px solid ${primaryColor}`,
                   display: "flex",
                   alignItems: "center",
                   gap: 3,
@@ -824,6 +829,28 @@ export default function CalendarWidget({
                   시간 지정 일정 포함
                 </span>
               </label>
+            </div>
+
+            {/* Timed events toggle */}
+            <div style={{ padding: "6px 12px", borderTop: `1px solid ${primaryColor}20` }}>
+              <div
+                onClick={() => {
+                  const next = !gcalShowTimed;
+                  setGcalShowTimed(next);
+                  localStorage.setItem("pcal_gcal_show_timed", String(next));
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 0" }}
+              >
+                <div style={{
+                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                  border: `1.5px solid ${gcalShowTimed ? primaryColor : "#ccc"}`,
+                  background: gcalShowTimed ? primaryColor : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {gcalShowTimed && <span style={{ color: "white", fontSize: 9, lineHeight: 1 }}>✓</span>}
+                </div>
+                <span style={{ fontSize: 10, color: darkMode ? "#ccc" : "#555" }}>시간 있는 일정 포함</span>
+              </div>
             </div>
 
             {/* Disconnect button */}
@@ -1000,18 +1027,11 @@ export default function CalendarWidget({
 
                         const gcalColor = seg.color || GCAL_DEFAULT_COLOR;
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
-                          background: isHovered || isUpdating
-                            ? hexToRgba(gcalColor, 0.22)
-                            : hexToRgba(gcalColor, 0.1),
-                          border: `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}`,
-                          borderLeft: seg.isStart ? `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}` : "none",
-                          borderRight: seg.isEnd ? `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}` : "none",
+                          boxShadow: `inset 0 0 0 1.5px ${isHovered ? gcalColor : hexToRgba(gcalColor, 0.8)}`,
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};
 
-                        const bgC = seg.isGCal
-                          ? "transparent"
-                          : isHovered ? seg.color : hexToRgba(seg.color, 0.55);
+                        const bgC = isHovered ? seg.color : hexToRgba(seg.color, 0.55);
 
                         return (
                           <div
@@ -1122,15 +1142,12 @@ export default function CalendarWidget({
                                 justifyContent: "flex-start", alignItems: "center",
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 pointerEvents: "none", fontSize: 9,
-                                color: seg.isGCal ? hexToRgba(gcalColor, 0.95) : labelColor,
+                                color: labelColor,
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
                                 width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
                               }}>
-                                {isUpdating
-                                  ? <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite", marginRight: 2 }}>↻</span>
-                                  : seg.isGCal && <span style={{ marginRight: 2, fontSize: 8 }}>🗓</span>
-                                }
+                                {isUpdating && <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite", marginRight: 2 }}>↻</span>}
                                 {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
                               </span>
                             )}
