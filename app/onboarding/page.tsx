@@ -84,6 +84,8 @@ export default function OnboardingPage() {
   const [gcalCalendars, setGcalCalendars] = useState<GCalCalendar[]>([]);
   const [gcalSelectedIds, setGcalSelectedIds] = useState<Set<string>>(new Set());
   const [gcalLoading, setGcalLoading] = useState(false);
+  const [gcalSyncTargetCalId, setGcalSyncTargetCalId] = useState("");
+  const [gcalShowTimed, setGcalShowTimed] = useState(false);
 
   const [importUrl, setImportUrl] = useState("");
 
@@ -118,6 +120,7 @@ export default function OnboardingPage() {
       }));
       setImportUrl("");
       setErrorMsg(null);
+      setStep(2);
     } catch {
       setErrorMsg("올바른 위젯 URL이 아닙니다.");
     }
@@ -290,6 +293,8 @@ export default function OnboardingPage() {
       };
       if (gcalToken && gcalSelectedIds.size > 0) {
         cfg.gcalCalIds = [...gcalSelectedIds];
+        if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
+        if (gcalShowTimed) cfg.gcalShowTimed = true;
       }
       const encoded = btoa(
         Array.from(new TextEncoder().encode(JSON.stringify(cfg)))
@@ -644,6 +649,47 @@ export default function OnboardingPage() {
                             </div>
                           );
                         })}
+                      </div>
+                    {/* Sync target calendar */}
+                      {gcalCalendars.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                          <label style={{ fontSize: 13, fontWeight: 600, color: "#555", display: "block", marginBottom: 8 }}>
+                            Notion 일정을 GCal에 추가할 때 사용할 캘린더
+                          </label>
+                          <select
+                            className="soft-select"
+                            value={gcalSyncTargetCalId}
+                            onChange={(e) => setGcalSyncTargetCalId(e.target.value)}
+                            style={{ marginBottom: 0, fontSize: 13 }}
+                          >
+                            <option value="">— 기본 캘린더 —</option>
+                            {gcalCalendars.map((cal) => (
+                              <option key={cal.id} value={cal.id}>
+                                {cal.summary}{cal.primary ? " (기본)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Timed events toggle */}
+                      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10 }}>
+                        <label
+                          onClick={() => setGcalShowTimed((p) => !p)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                        >
+                          <div style={{
+                            width: 36, height: 20, borderRadius: 10, flexShrink: 0, position: "relative",
+                            background: gcalShowTimed ? "#4285F4" : "#ccc", transition: "background 0.2s",
+                          }}>
+                            <div style={{
+                              position: "absolute", top: 3, left: gcalShowTimed ? 18 : 3,
+                              width: 14, height: 14, borderRadius: "50%", background: "white",
+                              transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                            }} />
+                          </div>
+                          <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>시간 지정 일정도 표시</span>
+                        </label>
                       </div>
                     </>
                   )}

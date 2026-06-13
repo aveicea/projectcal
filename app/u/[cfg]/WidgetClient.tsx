@@ -25,6 +25,7 @@ interface Config {
     weekView?: boolean;
   };
   gcalCalendarIds?: string[];
+  gcalSyncCalId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,6 +62,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         weekView: json.weekView ?? false,
       },
       gcalCalendarIds: Array.isArray(json.gcalCalIds) ? json.gcalCalIds as string[] : undefined,
+      gcalSyncCalId: json.gcalSyncCalId || undefined,
       createdAt: "",
       updatedAt: "",
     },
@@ -113,6 +115,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         theme={{ ...config.theme, barColors }}
         fontFamily={config.theme.fontFamily}
         initialGcalCalendarIds={config.gcalCalendarIds}
+        gcalSyncCalId={config.gcalSyncCalId}
       />
     </>
   );

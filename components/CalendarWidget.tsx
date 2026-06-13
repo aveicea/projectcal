@@ -75,6 +75,7 @@ interface CalendarWidgetProps {
   fontFamily?: string;
   previewProjects?: Project[];
   initialGcalCalendarIds?: string[];
+  gcalSyncCalId?: string;
 }
 
 const DAY_WIDTH = 25;
@@ -90,6 +91,7 @@ export default function CalendarWidget({
   fontFamily = "Pretendard",
   previewProjects,
   initialGcalCalendarIds,
+  gcalSyncCalId,
 }: CalendarWidgetProps) {
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
@@ -412,7 +414,7 @@ export default function CalendarWidget({
           private: { source: "projectcal", notionId: project.id },
         },
       };
-      const targetCalId = [...selectedCalendarIds][0] || "primary";
+      const targetCalId = gcalSyncCalId || [...selectedCalendarIds][0] || "primary";
       const res = await fetch("/api/gcal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -689,9 +691,9 @@ export default function CalendarWidget({
                   fontSize: 8,
                   fontWeight: 700,
                   letterSpacing: 0.3,
-                  color: gcalToken ? "white" : primaryColor,
-                  background: gcalToken ? primaryColor : "transparent",
-                  border: `1px solid ${primaryColor}`,
+                  color: primaryColor,
+                  background: "transparent",
+                  border: "none",
                   display: "flex",
                   alignItems: "center",
                   gap: 3,
@@ -829,28 +831,6 @@ export default function CalendarWidget({
                   시간 지정 일정 포함
                 </span>
               </label>
-            </div>
-
-            {/* Timed events toggle */}
-            <div style={{ padding: "6px 12px", borderTop: `1px solid ${primaryColor}20` }}>
-              <div
-                onClick={() => {
-                  const next = !gcalShowTimed;
-                  setGcalShowTimed(next);
-                  localStorage.setItem("pcal_gcal_show_timed", String(next));
-                }}
-                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 0" }}
-              >
-                <div style={{
-                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                  border: `1.5px solid ${gcalShowTimed ? primaryColor : "#ccc"}`,
-                  background: gcalShowTimed ? primaryColor : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  {gcalShowTimed && <span style={{ color: "white", fontSize: 9, lineHeight: 1 }}>✓</span>}
-                </div>
-                <span style={{ fontSize: 10, color: darkMode ? "#ccc" : "#555" }}>시간 있는 일정 포함</span>
-              </div>
             </div>
 
             {/* Disconnect button */}
@@ -1027,11 +1007,13 @@ export default function CalendarWidget({
 
                         const gcalColor = seg.color || GCAL_DEFAULT_COLOR;
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
-                          boxShadow: `inset 0 0 0 1.5px ${isHovered ? gcalColor : hexToRgba(gcalColor, 0.8)}`,
+                          boxShadow: `inset 0 0 0 1.5px rgba(255,255,255,0.45)`,
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};
 
-                        const bgC = isHovered ? seg.color : hexToRgba(seg.color, 0.55);
+                        const bgC = seg.isGCal
+                          ? gcalColor
+                          : isHovered ? seg.color : hexToRgba(seg.color, 0.55);
 
                         return (
                           <div
@@ -1067,7 +1049,7 @@ export default function CalendarWidget({
                               setHoveredId(seg.id);
                               setTooltip({
                                 visible: true, x: e.clientX, y: e.clientY,
-                                text: `${seg.isGCal ? "🗓 " : ""}${seg.title}  ${formatShortDate(seg.startDate)} ~ ${formatShortDate(seg.endDate)}`,
+                                text: `${seg.title}  ${formatShortDate(seg.startDate)} ~ ${formatShortDate(seg.endDate)}`,
                                 color: seg.isGCal ? gcalColor : seg.color,
                               });
                             }}
