@@ -28,9 +28,22 @@ interface GCalEventRaw {
   start: { date?: string; dateTime?: string };
   end: { date?: string; dateTime?: string };
   htmlLink?: string;
+  extendedProperties?: { private?: { source?: string } };
 }
 
-type AnySegment = ProjectSegment & { isGCal?: boolean; gcalLink?: string };
+interface GCalCalendar {
+  id: string;
+  summary: string;
+  backgroundColor?: string;
+  primary?: boolean;
+}
+
+type AnySegment = ProjectSegment & {
+  isGCal?: boolean;
+  gcalLink?: string;
+  gcalEventId?: string;
+  gcalCalendarId?: string;
+};
 
 // ── Widget interfaces ───────────────────────────────────────────────────────
 interface CalendarConfig {
@@ -67,7 +80,7 @@ const DAY_WIDTH = 25;
 const WEEK_DAY_WIDTH = 100;
 const ROW_HEIGHT = 26;
 const BAR_HEIGHT = 22;
-const GCAL_COLOR = "#4285F4";
+const GCAL_DEFAULT_COLOR = "#4285F4";
 
 export default function CalendarWidget({
   configId,
@@ -105,11 +118,16 @@ export default function CalendarWidget({
 
   // ── GCal state ────────────────────────────────────────────────────────────
   const [gcalToken, setGcalToken] = useState<string | null>(null);
+  const [gcalCalendars, setGcalCalendars] = useState<GCalCalendar[]>([]);
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<Set<string>>(new Set());
   const [gcalProjects, setGcalProjects] = useState<AnySegment[]>([]);
   const [gcalLoading, setGcalLoading] = useState(false);
+  const [showGCalPanel, setShowGCalPanel] = useState(false);
   const [syncingNotionId, setSyncingNotionId] = useState<string | null>(null);
   const [syncedIds, setSyncedIds] = useState<Set<string>>(new Set());
+  const [gcalUpdatingId, setGcalUpdatingId] = useState<string | null>(null);
 
+  // Load token + synced IDs from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = localStorage.getItem("pcal_gcal_token");
@@ -122,6 +140,46 @@ export default function CalendarWidget({
       try { setSyncedIds(new Set(JSON.parse(synced))); } catch { /* ignore */ }
     }
   }, []);
+
+  // Fetch calendar list when token changes
+  useEffect(() => {
+    if (!gcalToken) {
+      setGcalCalendars([]);
+      setSelectedCalendarIds(new Set());
+      setGcalProjects([]);
+      return;
+    }
+    fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=list`)
+      .then((res) => {
+        if (res.status === 401) throw new Error("401");
+        return res.json();
+      })
+      .then((data) => {
+        if (Array.isArray(data.items)) {
+          const cals: GCalCalendar[] = data.items;
+          setGcalCalendars(cals);
+          const saved = localStorage.getItem("pcal_gcal_selected");
+          if (saved) {
+            try {
+              const savedIds = new Set<string>(JSON.parse(saved));
+              // Only keep IDs that still exist
+              const valid = new Set(cals.map((c) => c.id).filter((id) => savedIds.has(id)));
+              setSelectedCalendarIds(valid.size > 0 ? valid : new Set(cals.map((c) => c.id)));
+            } catch {
+              setSelectedCalendarIds(new Set(cals.map((c) => c.id)));
+            }
+          } else {
+            setSelectedCalendarIds(new Set(cals.map((c) => c.id)));
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        if ((e as Error).message === "401") {
+          setGcalToken(null);
+          localStorage.removeItem("pcal_gcal_token");
+        }
+      });
+  }, [gcalToken]);
 
   const primaryColor = theme?.primaryColor ?? "#E8A8C0";
   const backgroundOpacity = theme?.backgroundOpacity ?? 100;
@@ -180,62 +238,86 @@ export default function CalendarWidget({
     }
   }, [loading, prevDays.length, prevWeekDays.length, weekView]);
 
-  // ── GCal functions ────────────────────────────────────────────────────────
-
-  const fetchGCalEvents = useCallback(async (token: string) => {
-    setGcalLoading(true);
-    try {
-      const params = new URLSearchParams({
-        token,
-        calendarId: "primary",
-        timeMin: `${fetchStart}T00:00:00Z`,
-        timeMax: `${fetchEnd}T23:59:59Z`,
-      });
-      const res = await fetch(`/api/gcal?${params}`);
-      if (res.status === 401) {
-        setGcalToken(null);
-        localStorage.removeItem("pcal_gcal_token");
-        return;
-      }
-      const data = await res.json();
-      if (Array.isArray(data.items)) {
-        const events: AnySegment[] = data.items
-          .filter((e: GCalEventRaw) => e.start.date || e.start.dateTime)
-          .map((e: GCalEventRaw, i: number) => {
-            const startDate = e.start.date || e.start.dateTime!.slice(0, 10);
-            let endDate = e.end.date
-              ? addDays(e.end.date, -1)
-              : (e.end.dateTime?.slice(0, 10) || startDate);
-            if (endDate < startDate) endDate = startDate;
-            return {
-              id: `gcal_${e.id}`,
-              title: e.summary || "(제목 없음)",
-              startDate,
-              endDate,
-              pageUrl: e.htmlLink || "#",
-              color: barColors[i % barColors.length],
-              group: undefined,
-              isStart: false,
-              isEnd: false,
-              duration: 0,
-              rowIndex: 0,
-              isGCal: true,
-              gcalLink: e.htmlLink || "#",
-            };
-          });
-        setGcalProjects(events);
-      }
-    } catch (e) {
-      console.error("GCal fetch error:", e);
-    } finally {
-      setGcalLoading(false);
-    }
-  }, [fetchStart, fetchEnd, barColors]);
-
+  // ── Fetch GCal events whenever selection/dates change ────────────────────
   useEffect(() => {
-    if (gcalToken) fetchGCalEvents(gcalToken);
-    else setGcalProjects([]);
-  }, [gcalToken, fetchGCalEvents]);
+    if (!gcalToken || selectedCalendarIds.size === 0 || gcalCalendars.length === 0) {
+      setGcalProjects([]);
+      return;
+    }
+
+    let cancelled = false;
+    setGcalLoading(true);
+
+    const calIds = [...selectedCalendarIds];
+    const colorMap = new Map(gcalCalendars.map((c) => [c.id, c.backgroundColor || GCAL_DEFAULT_COLOR]));
+
+    Promise.all(
+      calIds.map(async (calId) => {
+        const params = new URLSearchParams({
+          token: gcalToken,
+          calendarId: calId,
+          timeMin: `${fetchStart}T00:00:00Z`,
+          timeMax: `${fetchEnd}T23:59:59Z`,
+        });
+        const res = await fetch(`/api/gcal?${params}`);
+        if (res.status === 401) throw new Error("401");
+        const data = await res.json();
+        return { calId, data };
+      })
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const events: AnySegment[] = results.flatMap(({ calId, data }) => {
+          if (!Array.isArray(data.items)) return [];
+          const calColor = colorMap.get(calId) || GCAL_DEFAULT_COLOR;
+          return (data.items as GCalEventRaw[])
+            .filter((e) => (e.start.date || e.start.dateTime) &&
+              // Filter out events synced FROM this widget (already shown as Notion bars)
+              e.extendedProperties?.private?.source !== "projectcal"
+            )
+            .map((e) => {
+              const startDate = e.start.date || e.start.dateTime!.slice(0, 10);
+              let endDate = e.end.date
+                ? addDays(e.end.date, -1)
+                : (e.end.dateTime?.slice(0, 10) || startDate);
+              if (endDate < startDate) endDate = startDate;
+              return {
+                id: `gcal_${e.id}`,
+                title: e.summary || "(제목 없음)",
+                startDate,
+                endDate,
+                pageUrl: e.htmlLink || "#",
+                color: calColor,
+                group: undefined,
+                isStart: false,
+                isEnd: false,
+                duration: 0,
+                rowIndex: 0,
+                isGCal: true,
+                gcalLink: e.htmlLink || "#",
+                gcalEventId: e.id,
+                gcalCalendarId: calId,
+              } as AnySegment;
+            });
+        });
+        setGcalProjects(events);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        if ((e as Error).message === "401") {
+          setGcalToken(null);
+          localStorage.removeItem("pcal_gcal_token");
+        }
+        console.error("GCal fetch error:", e);
+      })
+      .finally(() => {
+        if (!cancelled) setGcalLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [gcalToken, selectedCalendarIds, gcalCalendars, fetchStart, fetchEnd]);
+
+  // ── GCal functions ────────────────────────────────────────────────────────
 
   const connectGCal = () => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -256,7 +338,6 @@ export default function CalendarWidget({
       "gcal-auth",
       "width=500,height=600,left=200,top=100"
     );
-
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type === "gcal-token") {
@@ -275,8 +356,22 @@ export default function CalendarWidget({
   const disconnectGCal = () => {
     setGcalToken(null);
     setGcalProjects([]);
+    setGcalCalendars([]);
+    setSelectedCalendarIds(new Set());
+    setShowGCalPanel(false);
     localStorage.removeItem("pcal_gcal_token");
     localStorage.removeItem("pcal_gcal_expiry");
+    localStorage.removeItem("pcal_gcal_selected");
+  };
+
+  const toggleCalendar = (calId: string) => {
+    setSelectedCalendarIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(calId)) next.delete(calId);
+      else next.add(calId);
+      localStorage.setItem("pcal_gcal_selected", JSON.stringify([...next]));
+      return next;
+    });
   };
 
   const syncToGCal = async (project: ProjectSegment) => {
@@ -294,10 +389,11 @@ export default function CalendarWidget({
           private: { source: "projectcal", notionId: project.id },
         },
       };
+      const targetCalId = [...selectedCalendarIds][0] || "primary";
       const res = await fetch("/api/gcal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: gcalToken, calendarId: "primary", event }),
+        body: JSON.stringify({ token: gcalToken, calendarId: targetCalId, event }),
       });
       if (res.status === 401) {
         setGcalToken(null);
@@ -310,12 +406,45 @@ export default function CalendarWidget({
           localStorage.setItem("pcal_synced_ids", JSON.stringify([...next]));
           return next;
         });
-        setTimeout(() => { if (gcalToken) fetchGCalEvents(gcalToken); }, 800);
       }
     } catch (e) {
       console.error("Sync error:", e);
     } finally {
       setSyncingNotionId(null);
+    }
+  };
+
+  const updateGCalEvent = async (seg: AnySegment, newStart: string, newEnd: string) => {
+    if (!gcalToken || !seg.gcalEventId) return;
+    setGcalUpdatingId(seg.id);
+    try {
+      const res = await fetch("/api/gcal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: gcalToken,
+          calendarId: seg.gcalCalendarId || "primary",
+          eventId: seg.gcalEventId,
+          patch: {
+            start: { date: newStart },
+            end: { date: addDays(newEnd, 1) },
+          },
+        }),
+      });
+      if (res.status === 401) {
+        setGcalToken(null);
+        localStorage.removeItem("pcal_gcal_token");
+        // Revert optimistic update
+        setDateOverrides((prev) => { const next = new Map(prev); next.delete(seg.id); return next; });
+      } else if (!res.ok) {
+        // Revert on failure
+        setDateOverrides((prev) => { const next = new Map(prev); next.delete(seg.id); return next; });
+      }
+    } catch (e) {
+      console.error("GCal update error:", e);
+      setDateOverrides((prev) => { const next = new Map(prev); next.delete(seg.id); return next; });
+    } finally {
+      setGcalUpdatingId(null);
     }
   };
 
@@ -406,12 +535,18 @@ export default function CalendarWidget({
 
   // ── Layout computation ────────────────────────────────────────────────────
 
-  const effectiveProjects: AnySegment[] = projects.map((p) => {
+  // Apply date overrides to both Notion and GCal events
+  const effectiveNotionProjects: AnySegment[] = projects.map((p) => {
     const o = dateOverrides.get(p.id);
     return o ? { ...p, ...o } : p;
   });
 
-  const allDisplayProjects: AnySegment[] = [...effectiveProjects, ...gcalProjects];
+  const effectiveGCalProjects: AnySegment[] = gcalProjects.map((p) => {
+    const o = dateOverrides.get(p.id);
+    return o ? { ...p, ...o } : p;
+  });
+
+  const allDisplayProjects: AnySegment[] = [...effectiveNotionProjects, ...effectiveGCalProjects];
 
   const rowMap = assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
@@ -470,7 +605,16 @@ export default function CalendarWidget({
       <style>{`
         @import url("https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css");
         @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+        @keyframes pcal-spin { 100% { transform: rotate(360deg); } }
       `}</style>
+
+      {/* Click-away overlay for GCal panel */}
+      {showGCalPanel && (
+        <div
+          onClick={() => setShowGCalPanel(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 499 }}
+        />
+      )}
 
       <div style={{
         fontFamily: font, background: bgColor,
@@ -503,12 +647,15 @@ export default function CalendarWidget({
             </span>
           </span>
 
-          {/* Right side: GCal button + label */}
           <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {configId !== "preview" && (
               <button
-                onClick={gcalToken ? disconnectGCal : connectGCal}
-                title={gcalToken ? "Google Calendar 연결됨 (클릭시 해제)" : "Google Calendar 연결"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (gcalToken) setShowGCalPanel((p) => !p);
+                  else connectGCal();
+                }}
+                title={gcalToken ? "Google Calendar 설정" : "Google Calendar 연결"}
                 style={{
                   cursor: "pointer",
                   padding: "1px 6px",
@@ -517,8 +664,8 @@ export default function CalendarWidget({
                   fontWeight: 700,
                   letterSpacing: 0.3,
                   color: gcalToken ? "white" : primaryColor,
-                  background: gcalToken ? GCAL_COLOR : "transparent",
-                  border: `1px solid ${gcalToken ? GCAL_COLOR : primaryColor}`,
+                  background: gcalToken ? GCAL_DEFAULT_COLOR : "transparent",
+                  border: `1px solid ${gcalToken ? GCAL_DEFAULT_COLOR : primaryColor}`,
                   display: "flex",
                   alignItems: "center",
                   gap: 3,
@@ -526,18 +673,128 @@ export default function CalendarWidget({
                   transition: "all 0.2s",
                 }}
               >
-                {gcalLoading ? (
-                  <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite" }}>↻</span>
-                ) : gcalToken ? (
-                  "● GCal"
-                ) : (
-                  "+ GCal"
-                )}
+                {gcalLoading
+                  ? <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite" }}>↻</span>
+                  : gcalToken ? "● GCal" : "+ GCal"
+                }
               </button>
             )}
             <span style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7 }}>PROJECT CAL</span>
           </span>
         </div>
+
+        {/* Google Calendar settings panel */}
+        {showGCalPanel && gcalToken && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              top: 22,
+              right: 0,
+              zIndex: 500,
+              background: darkMode ? "#2a2a2a" : "white",
+              border: `1px solid ${primaryColor}`,
+              borderTop: "none",
+              borderRadius: "0 0 8px 8px",
+              boxShadow: `0 8px 20px ${primaryColor}30`,
+              minWidth: 220,
+              maxWidth: 280,
+              fontSize: 11,
+            }}
+          >
+            {/* Panel header */}
+            <div style={{
+              padding: "8px 12px",
+              borderBottom: `1px solid ${primaryColor}20`,
+              fontWeight: 700,
+              color: primaryColor,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}>
+              <span>Google Calendar</span>
+              <button
+                onClick={() => setShowGCalPanel(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: primaryColor, fontSize: 11, padding: 2 }}
+              >✕</button>
+            </div>
+
+            {/* Calendar list */}
+            {gcalCalendars.length === 0 ? (
+              <div style={{ padding: "10px 12px", color: "#888", textAlign: "center" }}>
+                <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite" }}>↻</span>
+                {" "}불러오는 중...
+              </div>
+            ) : (
+              <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                {gcalCalendars.map((cal) => {
+                  const isSelected = selectedCalendarIds.has(cal.id);
+                  const calColor = cal.backgroundColor || GCAL_DEFAULT_COLOR;
+                  return (
+                    <div
+                      key={cal.id}
+                      onClick={() => toggleCalendar(cal.id)}
+                      style={{
+                        padding: "6px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                        background: "transparent",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = `${primaryColor}10`)}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      {/* Calendar color dot */}
+                      <div style={{
+                        width: 10, height: 10, borderRadius: "50%",
+                        background: calColor, flexShrink: 0,
+                        opacity: isSelected ? 1 : 0.35,
+                      }} />
+                      {/* Calendar name */}
+                      <span style={{
+                        flex: 1,
+                        color: darkMode ? "#ccc" : "#444",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        opacity: isSelected ? 1 : 0.5,
+                      }}>
+                        {cal.summary}
+                        {cal.primary && <span style={{ marginLeft: 4, fontSize: 9, color: "#aaa" }}>(기본)</span>}
+                      </span>
+                      {/* Checkbox */}
+                      <div style={{
+                        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                        border: `1.5px solid ${isSelected ? calColor : "#ccc"}`,
+                        background: isSelected ? calColor : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {isSelected && <span style={{ color: "white", fontSize: 9, lineHeight: 1 }}>✓</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Disconnect button */}
+            <div style={{ padding: "8px 12px", borderTop: `1px solid ${primaryColor}20` }}>
+              <button
+                onClick={disconnectGCal}
+                style={{
+                  width: "100%", padding: "5px 0",
+                  borderRadius: 6, border: "1px solid #e53e3e",
+                  background: "transparent", color: "#e53e3e",
+                  cursor: "pointer", fontSize: 10, fontWeight: 600,
+                }}
+              >
+                연결 해제
+              </button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div style={{ textAlign: "center", padding: 12, color: "#e53e3e", fontSize: 11 }}>{error}</div>
@@ -626,9 +883,33 @@ export default function CalendarWidget({
                         e.preventDefault();
                         const sourceId = e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain") || dragId || "";
                         if (!sourceId) { setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null; return; }
+
                         const mode = dragMode.current;
-                        const project = effectiveProjects.find((p) => p.id === sourceId);
-                        if (project && !project.isGCal) {
+                        const project = allDisplayProjects.find((p) => p.id === sourceId);
+
+                        if (project?.isGCal) {
+                          // GCal event drag → update in Google Calendar
+                          if (mode === "move" && dragGrabDate.current) {
+                            const delta = daysBetween(dragGrabDate.current, dateStr);
+                            if (delta !== 0) {
+                              const newStart = addDays(project.startDate, delta);
+                              const newEnd = addDays(project.endDate, delta);
+                              // Optimistic local update
+                              setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: newEnd }); return next; });
+                              setRowOverrides((prev) => { const next = new Map(prev); next.delete(sourceId); return next; });
+                              updateGCalEvent(project, newStart, newEnd);
+                            }
+                          } else if (mode === "resize-end") {
+                            const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
+                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
+                            updateGCalEvent(project, project.startDate, newEnd);
+                          } else if (mode === "resize-start") {
+                            const newStart = dateStr <= project.endDate ? dateStr : project.endDate;
+                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: project.endDate }); return next; });
+                            updateGCalEvent(project, newStart, project.endDate);
+                          }
+                        } else if (project) {
+                          // Notion event drag (local only)
                           if (mode === "move" && dragGrabDate.current) {
                             const delta = daysBetween(dragGrabDate.current, dateStr);
                             if (delta !== 0) {
@@ -649,6 +930,7 @@ export default function CalendarWidget({
                       {segments.map((seg) => {
                         const isHovered = hoveredId === seg.id;
                         const isDragging = dragId === seg.id;
+                        const isUpdating = gcalUpdatingId === seg.id;
                         const row = effectiveRowMap.get(seg.id) ?? 0;
                         const zIdx = isHovered ? (seg.isStart ? 210 : 200) : hoveredId ? 0 : (seg.isStart ? 2 : 1);
 
@@ -669,13 +951,15 @@ export default function CalendarWidget({
                             ? { borderTopRightRadius: 4, borderBottomRightRadius: 4, marginRight: 2, width: "calc(100% - 2px)" }
                             : { width: "100%" };
 
-                        // GCal events: outlined style
+                        const gcalColor = seg.color || GCAL_DEFAULT_COLOR;
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
-                          background: isHovered ? hexToRgba(GCAL_COLOR, 0.18) : hexToRgba(GCAL_COLOR, 0.08),
-                          border: `1.5px ${seg.isStart && seg.isEnd ? "solid" : seg.isStart ? "solid" : seg.isEnd ? "solid" : "solid"} ${hexToRgba(GCAL_COLOR, isHovered ? 0.9 : 0.5)}`,
-                          borderLeft: seg.isStart ? `1.5px solid ${hexToRgba(GCAL_COLOR, isHovered ? 0.9 : 0.5)}` : "none",
-                          borderRight: seg.isEnd ? `1.5px solid ${hexToRgba(GCAL_COLOR, isHovered ? 0.9 : 0.5)}` : "none",
-                          cursor: "pointer",
+                          background: isHovered || isUpdating
+                            ? hexToRgba(gcalColor, 0.22)
+                            : hexToRgba(gcalColor, 0.1),
+                          border: `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}`,
+                          borderLeft: seg.isStart ? `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}` : "none",
+                          borderRight: seg.isEnd ? `1.5px solid ${hexToRgba(gcalColor, isHovered ? 0.9 : 0.5)}` : "none",
+                          cursor: isUpdating ? "wait" : "grab",
                         } : {};
 
                         const bgC = seg.isGCal
@@ -689,16 +973,17 @@ export default function CalendarWidget({
                               height: BAR_HEIGHT, display: "flex", alignItems: "center",
                               justifyContent: "center", position: "absolute", color: "white",
                               fontSize: 10, fontWeight: "bold", overflow: "visible",
-                              transition: "background-color .2s", cursor: isDragging ? "grabbing" : (seg.isGCal ? "pointer" : "grab"),
+                              transition: "background-color .2s",
+                              cursor: isDragging ? "grabbing" : "grab",
                               left: 0, zIndex: zIdx, backgroundColor: bgC,
                               top: `${row * ROW_HEIGHT}px`,
                               ...shapeStyle,
                               ...(isDragging ? { opacity: 0.3 } : {}),
+                              ...(isUpdating ? { opacity: 0.6 } : {}),
                               ...gcalOutlineStyle,
                             }}
-                            draggable={!seg.isGCal}
-                            onClick={seg.isGCal ? () => window.open(seg.gcalLink, "_blank") : undefined}
-                            onDragStart={seg.isGCal ? undefined : (e) => {
+                            draggable={!isUpdating}
+                            onDragStart={(e) => {
                               dragMode.current = "move";
                               dragGrabDate.current = dateStr;
                               setDragId(seg.id);
@@ -707,7 +992,7 @@ export default function CalendarWidget({
                               e.dataTransfer.setData("application/x-project-id", seg.id);
                               e.dataTransfer.setData("text/plain", seg.id);
                             }}
-                            onDragEnd={seg.isGCal ? undefined : () => {
+                            onDragEnd={() => {
                               setDragId(null); setDropDateStr(null);
                               dragMode.current = null; dragGrabDate.current = null;
                             }}
@@ -716,7 +1001,7 @@ export default function CalendarWidget({
                               setTooltip({
                                 visible: true, x: e.clientX, y: e.clientY,
                                 text: `${seg.isGCal ? "🗓 " : ""}${seg.title}  ${formatShortDate(seg.startDate)} ~ ${formatShortDate(seg.endDate)}`,
-                                color: seg.isGCal ? GCAL_COLOR : seg.color,
+                                color: seg.isGCal ? gcalColor : seg.color,
                               });
                             }}
                             onMouseMove={(e) => {
@@ -727,15 +1012,15 @@ export default function CalendarWidget({
                               setTooltip((t) => ({ ...t, visible: false }));
                             }}
                           >
-                            {/* Left resize handle (Notion only) */}
-                            {seg.isStart && !seg.isGCal && (
+                            {/* Left resize handle */}
+                            {seg.isStart && (
                               <div
                                 draggable
                                 style={{
                                   position: "absolute", left: 0, top: 0, width: 7, height: "100%",
                                   cursor: "ew-resize", zIndex: 20,
                                   borderTopLeftRadius: 4, borderBottomLeftRadius: 4,
-                                  background: "rgba(255,255,255,0.25)",
+                                  background: seg.isGCal ? hexToRgba(gcalColor, 0.25) : "rgba(255,255,255,0.25)",
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onDragStart={(e) => {
@@ -755,15 +1040,15 @@ export default function CalendarWidget({
                               />
                             )}
 
-                            {/* Right resize handle (Notion only) */}
-                            {seg.isEnd && !seg.isGCal && (
+                            {/* Right resize handle */}
+                            {seg.isEnd && (
                               <div
                                 draggable
                                 style={{
                                   position: "absolute", right: 0, top: 0, width: 7, height: "100%",
                                   cursor: "ew-resize", zIndex: 20,
                                   borderTopRightRadius: 4, borderBottomRightRadius: 4,
-                                  background: "rgba(255,255,255,0.25)",
+                                  background: seg.isGCal ? hexToRgba(gcalColor, 0.25) : "rgba(255,255,255,0.25)",
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onDragStart={(e) => {
@@ -790,17 +1075,20 @@ export default function CalendarWidget({
                                 justifyContent: "flex-start", alignItems: "center",
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 pointerEvents: "none", fontSize: 9,
-                                color: seg.isGCal ? hexToRgba(GCAL_COLOR, 0.9) : labelColor,
+                                color: seg.isGCal ? hexToRgba(gcalColor, 0.95) : labelColor,
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
                                 width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
                               }}>
-                                {seg.isGCal && <span style={{ marginRight: 2, fontSize: 8 }}>🗓</span>}
+                                {isUpdating
+                                  ? <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite", marginRight: 2 }}>↻</span>
+                                  : seg.isGCal && <span style={{ marginRight: 2, fontSize: 8 }}>🗓</span>
+                                }
                                 {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
                               </span>
                             )}
 
-                            {/* Sync to GCal button (Notion events, when GCal connected, on hover) */}
+                            {/* Sync to GCal button (Notion events only, when GCal connected) */}
                             {isHovered && seg.isStart && !seg.isGCal && gcalToken && configId !== "preview" && (
                               <button
                                 title={syncedIds.has(seg.id) ? "Google Calendar에 추가됨" : "Google Calendar에 추가"}
@@ -815,7 +1103,7 @@ export default function CalendarWidget({
                                   transform: "translateY(-50%)",
                                   fontSize: 7,
                                   padding: "1px 4px",
-                                  background: syncedIds.has(seg.id) ? "#34A853" : GCAL_COLOR,
+                                  background: syncedIds.has(seg.id) ? "#34A853" : GCAL_DEFAULT_COLOR,
                                   color: "white",
                                   border: "none",
                                   borderRadius: 3,
@@ -854,19 +1142,15 @@ export default function CalendarWidget({
         <div style={{
           position: "fixed", zIndex: 9999, padding: "4px 8px", borderRadius: 6,
           fontSize: 10, fontWeight: "bold", color: "#555", pointerEvents: "none",
-          boxShadow: "2px 2px 8px rgba(0,0,0,.1)", border: "1px solid rgba(255,255,255,.5)",
+          boxShadow: "2px 2px 8px rgba(0,0,0,.1)",
           transform: "translate(-50%, 15px)", whiteSpace: "nowrap",
           left: tooltip.x, top: tooltip.y,
           backgroundColor: tooltip.color ? hexToRgba(tooltip.color, 0.15) : "#fff",
-          borderColor: tooltip.color ? hexToRgba(tooltip.color, 0.4) : "#eee",
+          border: `1px solid ${tooltip.color ? hexToRgba(tooltip.color, 0.4) : "#eee"}`,
         }}>
           {tooltip.text}
         </div>
       )}
-
-      <style>{`
-        @keyframes pcal-spin { 100% { transform: rotate(360deg); } }
-      `}</style>
     </>
   );
 }
