@@ -28,7 +28,7 @@ interface GCalEventRaw {
   start: { date?: string; dateTime?: string };
   end: { date?: string; dateTime?: string };
   htmlLink?: string;
-  extendedProperties?: { private?: { source?: string } };
+  extendedProperties?: { private?: { source?: string; notionId?: string } };
 }
 
 interface GCalCalendar {
@@ -126,6 +126,8 @@ export default function CalendarWidget({
   const [syncingNotionId, setSyncingNotionId] = useState<string | null>(null);
   const [syncedIds, setSyncedIds] = useState<Set<string>>(new Set());
   const [gcalUpdatingId, setGcalUpdatingId] = useState<string | null>(null);
+  // Notion IDs that have a corresponding event in GCal → hide the Notion bar
+  const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
 
   // Load token + synced IDs from localStorage
   useEffect(() => {
@@ -271,10 +273,7 @@ export default function CalendarWidget({
           if (!Array.isArray(data.items)) return [];
           const calColor = colorMap.get(calId) || GCAL_DEFAULT_COLOR;
           return (data.items as GCalEventRaw[])
-            .filter((e) => (e.start.date || e.start.dateTime) &&
-              // Filter out events synced FROM this widget (already shown as Notion bars)
-              e.extendedProperties?.private?.source !== "projectcal"
-            )
+            .filter((e) => e.start.date || e.start.dateTime)
             .map((e) => {
               const startDate = e.start.date || e.start.dateTime!.slice(0, 10);
               let endDate = e.end.date
@@ -300,6 +299,15 @@ export default function CalendarWidget({
               } as AnySegment;
             });
         });
+        // Collect Notion IDs that have a GCal counterpart → hide the Notion bar
+        const syncedFromGCal = new Set<string>();
+        results.forEach(({ data }) => {
+          (data.items as GCalEventRaw[] ?? []).forEach((e) => {
+            const nid = e.extendedProperties?.private?.notionId;
+            if (nid) syncedFromGCal.add(nid);
+          });
+        });
+        setGcalSyncedNotionIds(syncedFromGCal);
         setGcalProjects(events);
       })
       .catch((e: unknown) => {
@@ -358,6 +366,7 @@ export default function CalendarWidget({
     setGcalProjects([]);
     setGcalCalendars([]);
     setSelectedCalendarIds(new Set());
+    setGcalSyncedNotionIds(new Set());
     setShowGCalPanel(false);
     localStorage.removeItem("pcal_gcal_token");
     localStorage.removeItem("pcal_gcal_expiry");
@@ -536,10 +545,13 @@ export default function CalendarWidget({
   // ── Layout computation ────────────────────────────────────────────────────
 
   // Apply date overrides to both Notion and GCal events
-  const effectiveNotionProjects: AnySegment[] = projects.map((p) => {
-    const o = dateOverrides.get(p.id);
-    return o ? { ...p, ...o } : p;
-  });
+  // Hide Notion events that have been synced to GCal (show GCal version instead)
+  const effectiveNotionProjects: AnySegment[] = projects
+    .filter((p) => !gcalSyncedNotionIds.has(p.id))
+    .map((p) => {
+      const o = dateOverrides.get(p.id);
+      return o ? { ...p, ...o } : p;
+    });
 
   const effectiveGCalProjects: AnySegment[] = gcalProjects.map((p) => {
     const o = dateOverrides.get(p.id);

@@ -24,6 +24,7 @@ interface Config {
     darkMode: boolean;
     weekView?: boolean;
   };
+  gcalCalendarIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +60,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         darkMode: json.darkMode ?? false,
         weekView: json.weekView ?? false,
       },
+      gcalCalendarIds: Array.isArray(json.gcalCalIds) ? json.gcalCalIds as string[] : undefined,
       createdAt: "",
       updatedAt: "",
     },
