@@ -26,6 +26,8 @@ interface Config {
   };
   gcalCalendarIds?: string[];
   gcalSyncCalId?: string;
+  gcalToken?: string;
+  gcalShowTimed?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +65,8 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
       },
       gcalCalendarIds: Array.isArray(json.gcalCalIds) ? json.gcalCalIds as string[] : undefined,
       gcalSyncCalId: json.gcalSyncCalId || undefined,
+      gcalToken: json.gcalToken || undefined,
+      gcalShowTimed: json.gcalShowTimed ?? false,
       createdAt: "",
       updatedAt: "",
     },
@@ -116,6 +120,8 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         fontFamily={config.theme.fontFamily}
         initialGcalCalendarIds={config.gcalCalendarIds}
         gcalSyncCalId={config.gcalSyncCalId}
+        initialGcalToken={config.gcalToken}
+        initialGcalShowTimed={config.gcalShowTimed}
       />
     </>
   );

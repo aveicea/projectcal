@@ -291,8 +291,9 @@ export default function OnboardingPage() {
         darkMode: settings.darkMode,
         weekView: settings.weekView,
       };
-      if (gcalToken && gcalSelectedIds.size > 0) {
-        cfg.gcalCalIds = [...gcalSelectedIds];
+      if (gcalToken) {
+        cfg.gcalToken = gcalToken;
+        if (gcalSelectedIds.size > 0) cfg.gcalCalIds = [...gcalSelectedIds];
         if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
         if (gcalShowTimed) cfg.gcalShowTimed = true;
       }

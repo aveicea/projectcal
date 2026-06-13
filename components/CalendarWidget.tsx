@@ -76,6 +76,8 @@ interface CalendarWidgetProps {
   previewProjects?: Project[];
   initialGcalCalendarIds?: string[];
   gcalSyncCalId?: string;
+  initialGcalToken?: string;
+  initialGcalShowTimed?: boolean;
 }
 
 const DAY_WIDTH = 25;
@@ -92,6 +94,8 @@ export default function CalendarWidget({
   previewProjects,
   initialGcalCalendarIds,
   gcalSyncCalId,
+  initialGcalToken,
+  initialGcalShowTimed,
 }: CalendarWidgetProps) {
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
@@ -135,13 +139,16 @@ export default function CalendarWidget({
   // Whether to include timed events (not just all-day events)
   const [gcalShowTimed, setGcalShowTimed] = useState(false);
 
-  // Load token + synced IDs from localStorage
+  // Load token + synced IDs from localStorage (or from URL-embedded token)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = localStorage.getItem("pcal_gcal_token");
     const expiry = localStorage.getItem("pcal_gcal_expiry");
     if (token && expiry && Date.now() < parseInt(expiry)) {
       setGcalToken(token);
+    } else if (initialGcalToken) {
+      // URL-embedded token (no expiry check — if expired, 401 handler will clear it)
+      setGcalToken(initialGcalToken);
     }
     const synced = localStorage.getItem("pcal_synced_ids");
     if (synced) {
@@ -149,7 +156,8 @@ export default function CalendarWidget({
     }
     const showTimed = localStorage.getItem("pcal_gcal_show_timed");
     if (showTimed === "true") setGcalShowTimed(true);
-  }, []);
+    else if (initialGcalShowTimed) setGcalShowTimed(true);
+  }, [initialGcalToken]);
 
   // Fetch calendar list when token changes
   useEffect(() => {
@@ -754,7 +762,7 @@ export default function CalendarWidget({
                 {" "}불러오는 중...
               </div>
             ) : (
-              <div style={{ maxHeight: 200, overflowY: "auto" }}>
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
                 {gcalCalendars.map((cal) => {
                   const isSelected = selectedCalendarIds.has(cal.id);
                   const calColor = cal.backgroundColor || GCAL_DEFAULT_COLOR;
