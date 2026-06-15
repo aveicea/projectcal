@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
@@ -20,6 +21,13 @@ const THEMES = [
   { name: "블루",    colors: { background: "#F5FAFF", primary: "#5FA3EE", barColors: ["#BAE1FF","#A0C4FF","#BDB2FF","#9BF6FF","#CAF0F8","#ADE8F4","#90E0EF","#48CAE4"] } },
   { name: "노란",    colors: { background: "#FFFEF5", primary: "#FCD34D", barColors: ["#FFDAC1","#FFDFBA","#FFE5B4","#FFEAA7","#FFF3BF","#FFD93D","#FFC93C","#F4D35E"] } },
 ];
+
+interface GCalCalendar {
+  id: string;
+  summary: string;
+  backgroundColor?: string;
+  primary?: boolean;
+}
 
 interface Settings {
   databaseId: string;
@@ -60,16 +68,167 @@ function makePreviewProjects(multiRow: boolean): Project[] {
   return base;
 }
 
-export default function OnboardingPage() {
+function OnboardingPageInner() {
+  // step: 1=Notion, 2=GCal, 3=Design, 4=Done
   const [step, setStep] = useState(1);
   const [generating, setGenerating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
+  const [dateProperties, setDateProperties] = useState<string[]>([]);
+  const [titleProperties, setTitleProperties] = useState<{ name: string; type: string }[]>([]);
   const [selectedDbName, setSelectedDbName] = useState("");
   const [selectedTheme, setSelectedTheme] = useState("파스텔🌸");
   const [generatedUrl, setGeneratedUrl] = useState("");
+
+  // Google Calendar state
+  const [gcalToken, setGcalToken] = useState<string | null>(null);
+  const [gcalCalendars, setGcalCalendars] = useState<GCalCalendar[]>([]);
+  const [gcalSelectedIds, setGcalSelectedIds] = useState<Set<string>>(new Set());
+  const [gcalLoading, setGcalLoading] = useState(false);
+  const [gcalSyncTargetCalId, setGcalSyncTargetCalId] = useState("");
+  const [gcalShowTimed, setGcalShowTimed] = useState(false);
+  const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
+  const [gcalBorderColorOverrides, setGcalBorderColorOverrides] = useState<Record<string, string>>({});
+
+  // Notion group color state
+  const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
+  const [selectOptions, setSelectOptions] = useState<Record<string, string[]>>({});
+
+  const [importUrl, setImportUrl] = useState("");
+  const searchParams = useSearchParams();
+
+  // Auto-import from ?from= query param
+  useEffect(() => {
+    const fromParam = searchParams.get("from");
+    if (!fromParam) return;
+    const run = async () => {
+      try {
+        let base64 = fromParam.replace(/-/g, "+").replace(/_/g, "/");
+        while (base64.length % 4) base64 += "=";
+        const raw = atob(base64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const json = JSON.parse(new TextDecoder().decode(bytes));
+        const apiKey = (json.token as string) ?? "";
+        const databaseId = (json.dbId as string) ?? "";
+        const groupProperty = (json.groupProp as string) ?? "";
+        setSettings((prev) => ({
+          ...prev,
+          apiKey,
+          databaseId,
+          dateProperty: (json.dateProp as string) ?? prev.dateProperty,
+          titleProperty: (json.titleProp as string) ?? prev.titleProperty,
+          groupProperty,
+          primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
+          backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
+          backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
+          fontFamily: (json.fontFamily as string) ?? prev.fontFamily,
+          barColors: Array.isArray(json.barColors) ? json.barColors as string[] : prev.barColors,
+          labelColor: (json.labelColor as string) ?? prev.labelColor,
+          multiRow: (json.multiRow as boolean) ?? prev.multiRow,
+          darkMode: (json.darkMode as boolean) ?? prev.darkMode,
+          weekView: (json.weekView as boolean) ?? prev.weekView,
+        }));
+        if (json.gcalToken) {
+          setGcalToken(json.gcalToken as string);
+          const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
+          if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
+          if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
+          if (json.gcalShowTimed) setGcalShowTimed(true);
+          if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
+          if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
+          loadGCalCalendars(json.gcalToken as string, restoredIds);
+        }
+        if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
+        setStep(3);
+        // Fetch DB properties directly (don't rely on later-defined helpers)
+        if (apiKey && databaseId) {
+          const res = await fetch("/api/analyze-database", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey, databaseId, groupProperty: groupProperty || undefined }),
+          });
+          const data = await res.json();
+          if (data.success && data.data) {
+            setGroupableProperties(data.data.groupableProperties ?? []);
+            setDateProperties(data.data.dateProperties ?? []);
+            setTitleProperties(data.data.titleProperties ?? []);
+            setSelectOptions(data.data.selectOptions ?? {});
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    run();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleImportUrl = async () => {
+    try {
+      const trimmed = importUrl.trim();
+      const cfgPart = trimmed.includes("/u/") ? trimmed.split("/u/")[1].split("?")[0] : trimmed;
+      if (!cfgPart) throw new Error("Invalid URL");
+      let base64 = cfgPart.replace(/-/g, "+").replace(/_/g, "/");
+      while (base64.length % 4) base64 += "=";
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const json = JSON.parse(new TextDecoder().decode(bytes));
+      const apiKey = (json.token as string) ?? "";
+      const databaseId = (json.dbId as string) ?? "";
+      const groupProperty = (json.groupProp as string) ?? "";
+
+      setSettings((prev) => ({
+        ...prev,
+        apiKey,
+        databaseId,
+        dateProperty: (json.dateProp as string) ?? prev.dateProperty,
+        titleProperty: (json.titleProp as string) ?? prev.titleProperty,
+        groupProperty,
+        primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
+        backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
+        backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
+        fontFamily: (json.fontFamily as string) ?? prev.fontFamily,
+        barColors: Array.isArray(json.barColors) ? json.barColors as string[] : prev.barColors,
+        labelColor: (json.labelColor as string) ?? prev.labelColor,
+        multiRow: (json.multiRow as boolean) ?? prev.multiRow,
+        darkMode: (json.darkMode as boolean) ?? prev.darkMode,
+        weekView: (json.weekView as boolean) ?? prev.weekView,
+      }));
+      if (json.gcalToken) {
+        setGcalToken(json.gcalToken as string);
+        const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
+        if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
+        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
+        if (json.gcalShowTimed) setGcalShowTimed(true);
+        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
+        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
+        loadGCalCalendars(json.gcalToken as string, restoredIds);
+      }
+      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
+      setImportUrl("");
+      setErrorMsg(null);
+      setStep(2);
+      // Fetch DB properties directly
+      if (apiKey && databaseId) {
+        const res = await fetch("/api/analyze-database", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey, databaseId, groupProperty: groupProperty || undefined }),
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setGroupableProperties(data.data.groupableProperties ?? []);
+          setDateProperties(data.data.dateProperties ?? []);
+          setTitleProperties(data.data.titleProperties ?? []);
+          setSelectOptions(data.data.selectOptions ?? {});
+        }
+      }
+    } catch {
+      setErrorMsg("올바른 위젯 URL이 아닙니다.");
+    }
+  };
 
   const [settings, setSettings] = useState<Settings>({
     databaseId: "",
@@ -92,6 +251,49 @@ export default function OnboardingPage() {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setErrorMsg(null);
   };
+
+  // Auto-load DB properties whenever apiKey+databaseId are set and selectOptions is empty
+  useEffect(() => {
+    if (!settings.apiKey || !settings.databaseId) return;
+    if (Object.keys(selectOptions).length > 0) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: settings.apiKey, databaseId: settings.databaseId }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          setGroupableProperties(json.data.groupableProperties ?? []);
+          setDateProperties(json.data.dateProperties ?? []);
+          setTitleProperties(json.data.titleProperties ?? []);
+          setSelectOptions(json.data.selectOptions ?? {});
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.apiKey, settings.databaseId]);
+
+  // When user picks a group property, fetch unique values from pages if not already in selectOptions
+  useEffect(() => {
+    if (!settings.groupProperty || !settings.apiKey || !settings.databaseId) return;
+    if (selectOptions[settings.groupProperty]) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: settings.apiKey, databaseId: settings.databaseId, groupProperty: settings.groupProperty }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data?.selectOptions) {
+          setSelectOptions((prev) => ({ ...prev, ...json.data.selectOptions }));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.groupProperty]);
+
+  // ── Notion ────────────────────────────────────────────────────────────────
 
   const handleLoadDatabases = async () => {
     if (!settings.apiKey.trim()) { setErrorMsg("Notion API 키를 입력해주세요."); return; }
@@ -139,6 +341,9 @@ export default function OnboardingPage() {
           groupProperty: "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
+        setDateProperties(json.data.dateProperties ?? []);
+        setTitleProperties(json.data.titleProperties ?? []);
+        setSelectOptions(json.data.selectOptions ?? {});
       }
     } catch (e) {
       console.error(e);
@@ -147,11 +352,101 @@ export default function OnboardingPage() {
     }
   };
 
+  const loadDbPropertiesQuiet = async (apiKey: string, databaseId: string, groupProperty?: string) => {
+    if (!apiKey || !databaseId) return;
+    try {
+      const res = await fetch("/api/analyze-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, databaseId }),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setGroupableProperties(json.data.groupableProperties ?? []);
+        setDateProperties(json.data.dateProperties ?? []);
+        setTitleProperties(json.data.titleProperties ?? []);
+        setSelectOptions(json.data.selectOptions ?? {});
+        if (groupProperty) {
+          setSettings((prev) => ({ ...prev, groupProperty }));
+        }
+      }
+    } catch { /* silent */ }
+  };
+
+  // ── Google Calendar ───────────────────────────────────────────────────────
+
+  const connectGCal = () => {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      setErrorMsg("NEXT_PUBLIC_GOOGLE_CLIENT_ID 환경 변수가 설정되지 않았습니다. Vercel 대시보드를 확인해주세요.");
+      return;
+    }
+    const redirectUri = `${window.location.origin}/gcal-callback`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "token",
+      scope: "https://www.googleapis.com/auth/calendar",
+      prompt: "consent",
+    });
+    const popup = window.open(
+      `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
+      "gcal-auth",
+      "width=500,height=600,left=200,top=100"
+    );
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === "gcal-token") {
+        const { token } = event.data as { type: string; token: string };
+        setGcalToken(token);
+        loadGCalCalendars(token);
+        window.removeEventListener("message", handleMessage);
+        popup?.close();
+      }
+    };
+    window.addEventListener("message", handleMessage);
+  };
+
+  const loadGCalCalendars = async (token: string, keepSelection?: Set<string>) => {
+    setGcalLoading(true);
+    try {
+      const res = await fetch(`/api/gcal?token=${encodeURIComponent(token)}&action=list`);
+      const data = await res.json();
+      if (Array.isArray(data.items)) {
+        setGcalCalendars(data.items);
+        if (!keepSelection || keepSelection.size === 0) {
+          setGcalSelectedIds(new Set(data.items.map((c: GCalCalendar) => c.id)));
+        }
+      }
+    } catch (e) {
+      console.error("GCal calendar list error:", e);
+    } finally {
+      setGcalLoading(false);
+    }
+  };
+
+  const toggleGCalCalendar = (id: string) => {
+    setGcalSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const disconnectGCal = () => {
+    setGcalToken(null);
+    setGcalCalendars([]);
+    setGcalSelectedIds(new Set());
+  };
+
+  // ── Generate URL ──────────────────────────────────────────────────────────
+
   const handleGenerate = async () => {
     setGenerating(true);
     setErrorMsg(null);
     try {
-      const cfg = {
+      const cfg: Record<string, unknown> = {
         token: settings.apiKey,
         dbId: settings.databaseId,
         dateProp: settings.dateProperty,
@@ -167,13 +462,22 @@ export default function OnboardingPage() {
         darkMode: settings.darkMode,
         weekView: settings.weekView,
       };
+      if (gcalToken) {
+        cfg.gcalToken = gcalToken;
+        if (gcalSelectedIds.size > 0) cfg.gcalCalIds = [...gcalSelectedIds];
+        if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
+        if (gcalShowTimed) cfg.gcalShowTimed = true;
+        if (Object.keys(gcalColorOverrides).length > 0) cfg.gcalCalColors = gcalColorOverrides;
+        if (Object.keys(gcalBorderColorOverrides).length > 0) cfg.gcalBorderColors = gcalBorderColorOverrides;
+      }
+      if (Object.keys(groupColorOverrides).length > 0) cfg.groupColors = groupColorOverrides;
       const encoded = btoa(
         Array.from(new TextEncoder().encode(JSON.stringify(cfg)))
           .map((b) => String.fromCharCode(b))
           .join("")
       ).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
       setGeneratedUrl(`${window.location.origin}/u/${encoded}`);
-      setStep(3);
+      setStep(4);
     } catch (e) {
       console.error(e);
       setErrorMsg("설정 생성 중 오류가 발생했습니다.");
@@ -272,6 +576,10 @@ export default function OnboardingPage() {
           background: white; color: #666; border: 1px solid #eee; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
         .soft-btn.secondary:hover { background: #f9f9f9; border-color: #ddd; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .soft-btn.gcal {
+          background: #4285F4; box-shadow: 0 4px 12px rgba(66,133,244,0.3);
+        }
+        .soft-btn.gcal:hover { background: #3367D6; box-shadow: 0 6px 16px rgba(66,133,244,0.4); }
 
         .db-card {
           border: 1px solid #f0f0f0; border-radius: 16px; background: white; padding: 24px;
@@ -280,6 +588,14 @@ export default function OnboardingPage() {
         }
         .db-card:hover { border-color: #E8A8C0; transform: translateY(-4px); box-shadow: 0 10px 20px rgba(232,168,192,0.15); }
         .db-card.selected { border-color: #E8A8C0; background: #FFF5F8; box-shadow: 0 0 0 2px #E8A8C0; }
+
+        .cal-card {
+          border: 1px solid #f0f0f0; border-radius: 12px; background: white; padding: 14px 18px;
+          cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 12px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        }
+        .cal-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.06); }
+        .cal-card.selected { border-color: #4285F4; background: #F0F4FF; }
 
         .theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
         .theme-item {
@@ -316,7 +632,7 @@ export default function OnboardingPage() {
           background: #E8A8C0; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
 
-        .bar-colors-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+        .bar-colors-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
         .bar-color-item {
           display: flex; align-items: center; gap: 6px; padding: 6px 8px;
           background: #fff; border: 1px solid #f0f0f0; border-radius: 8px;
@@ -353,9 +669,10 @@ export default function OnboardingPage() {
 
         <div className="window-content">
           <div className="step-progress-bar">
-            <div className={`step-pill ${step >= 1 ? "completed" : "active"}`}>01 연결</div>
-            <div className={`step-pill ${step > 2 ? "completed" : step === 2 ? "active" : ""}`}>02 디자인</div>
-            <div className={`step-pill ${step > 3 ? "completed" : step === 3 ? "active" : ""}`}>03 완료</div>
+            <div className={`step-pill ${step > 1 ? "completed" : step === 1 ? "active" : ""}`}>01 Notion</div>
+            <div className={`step-pill ${step > 2 ? "completed" : step === 2 ? "active" : ""}`}>02 Google</div>
+            <div className={`step-pill ${step > 3 ? "completed" : step === 3 ? "active" : ""}`}>03 디자인</div>
+            <div className={`step-pill ${step === 4 ? "active" : ""}`}>04 완료</div>
           </div>
 
           {errorMsg && (
@@ -364,7 +681,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 1: API 키 입력 + 데이터베이스 선택 */}
+          {/* Step 1: Notion */}
           {step === 1 && (
             <div style={{ animation: "fadeIn 0.5s" }}>
               <div style={{ textAlign: "center", marginBottom: 40 }}>
@@ -374,6 +691,23 @@ export default function OnboardingPage() {
                 <h2 style={{ fontSize: 24, marginBottom: 12, fontWeight: 700 }}>Notion 연결하기</h2>
                 <p style={{ color: "#888", fontSize: 15 }}>Integration 토큰을 사용하여 데이터베이스를 불러옵니다.</p>
               </div>
+              <div style={{ maxWidth: 450, margin: "0 auto 28px" }}>
+                <label style={{ display: "block", marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#888" }}>기존 위젯 URL로 설정 불러오기</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="soft-input" value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="https://...projectcal.../u/..." style={{ marginBottom: 0, fontSize: 13 }} />
+                  <button className="soft-btn secondary" onClick={handleImportUrl} disabled={!importUrl.trim()} style={{ whiteSpace: "nowrap", fontSize: 13, padding: "0 16px" }}>
+                    불러오기
+                  </button>
+                </div>
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 1, background: "#eee" }} />
+                  <span style={{ fontSize: 12, color: "#bbb" }}>또는 직접 입력</span>
+                  <div style={{ flex: 1, height: 1, background: "#eee" }} />
+                </div>
+              </div>
+
               <div style={{ maxWidth: 450, margin: "0 auto" }}>
                 <label style={{ display: "block", marginBottom: 10, fontWeight: 600, fontSize: 14, color: "#555" }}>API TOKEN</label>
                 <div style={{ display: "flex", gap: 10 }}>
@@ -404,7 +738,7 @@ export default function OnboardingPage() {
                   {settings.databaseId && !loading && (
                     <div style={{ marginTop: 28, display: "flex", justifyContent: "center", animation: "fadeIn 0.4s" }}>
                       <button className="soft-btn" onClick={() => setStep(2)} style={{ padding: "14px 48px" }}>
-                        다음: 디자인 설정 →
+                        다음: Google Calendar →
                       </button>
                     </div>
                   )}
@@ -413,11 +747,165 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 2: 속성 설정 + 디자인 */}
+          {/* Step 2: Google Calendar */}
           {step === 2 && (
+            <div style={{ animation: "fadeIn 0.5s" }}>
+              <div style={{ textAlign: "center", marginBottom: 40 }}>
+                <div style={{ width: 80, height: 80, background: "#EEF2FF", borderRadius: "50%", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>
+                  🗓
+                </div>
+                <h2 style={{ fontSize: 24, marginBottom: 12, fontWeight: 700 }}>Google Calendar 연결</h2>
+                <p style={{ color: "#888", fontSize: 15 }}>Google Calendar 일정을 함께 표시하고, Notion 일정을 GCal에 추가할 수 있습니다.</p>
+                <p style={{ color: "#bbb", fontSize: 13, marginTop: 6 }}>선택 사항입니다. 건너뛸 수 있어요.</p>
+              </div>
+
+              {!gcalToken ? (
+                <div style={{ textAlign: "center" }}>
+                  <button className="soft-btn gcal" onClick={connectGCal} style={{ fontSize: 16, padding: "16px 48px" }}>
+                    🔗 Google Calendar 연결하기
+                  </button>
+                  {!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && (
+                    <p style={{ marginTop: 16, color: "#e53e3e", fontSize: 13 }}>
+                      ⚠ NEXT_PUBLIC_GOOGLE_CLIENT_ID 환경 변수가 설정되지 않았습니다.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.4s" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#34A853" }} />
+                      <span style={{ fontWeight: 700, color: "#333", fontSize: 15 }}>연결됨</span>
+                    </div>
+                    <button className="soft-btn secondary" onClick={disconnectGCal} style={{ padding: "8px 16px", fontSize: 13 }}>
+                      연결 해제
+                    </button>
+                  </div>
+
+                  {gcalLoading ? (
+                    <div style={{ textAlign: "center", padding: 40, color: "#888" }}>
+                      <span style={{ display: "inline-block", animation: "spin 1s linear infinite", fontSize: 24 }}>↻</span>
+                      <p style={{ marginTop: 12 }}>캘린더 목록 불러오는 중...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: 13, color: "#666", marginBottom: 16, textAlign: "center" }}>
+                        위젯에 표시할 캘린더를 선택하세요. ({gcalSelectedIds.size}/{gcalCalendars.length}개 선택됨)
+                      </p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+                        {gcalCalendars.map((cal) => {
+                          const isSelected = gcalSelectedIds.has(cal.id);
+                          const color = gcalColorOverrides[cal.id] || cal.backgroundColor || "#4285F4";
+                          return (
+                            <div
+                              key={cal.id}
+                              className={`cal-card${isSelected ? " selected" : ""}`}
+                              onClick={() => toggleGCalCalendar(cal.id)}
+                            >
+                              {/* Fill color picker */}
+                              <input
+                                type="color"
+                                value={color}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setGcalColorOverrides((prev) => ({ ...prev, [cal.id]: e.target.value }));
+                                }}
+                                style={{ width: 18, height: 18, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                              />
+                              {/* Border color picker */}
+                              <input
+                                type="color"
+                                title="테두리 색"
+                                value={gcalBorderColorOverrides[cal.id] || "#ffffff"}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setGcalBorderColorOverrides((prev) => ({ ...prev, [cal.id]: e.target.value }));
+                                }}
+                                style={{ width: 18, height: 18, padding: 0, border: "1px dashed #aaa", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                              />
+                              <div style={{ flex: 1, overflow: "hidden" }}>
+                                <div style={{ fontWeight: 600, fontSize: 13, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {cal.summary}
+                                  {cal.primary && <span style={{ marginLeft: 6, fontSize: 10, color: "#999", fontWeight: 400 }}>기본</span>}
+                                </div>
+                              </div>
+                              <div style={{
+                                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                                border: `2px solid ${isSelected ? color : "#ddd"}`,
+                                background: isSelected ? color : "transparent",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                              }}>
+                                {isSelected && <span style={{ color: "white", fontSize: 11, lineHeight: 1 }}>✓</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    {/* Sync target calendar */}
+                      {gcalCalendars.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                          <label style={{ fontSize: 13, fontWeight: 600, color: "#555", display: "block", marginBottom: 8 }}>
+                            Notion 일정을 GCal에 추가할 때 사용할 캘린더
+                          </label>
+                          <select
+                            className="soft-select"
+                            value={gcalSyncTargetCalId}
+                            onChange={(e) => setGcalSyncTargetCalId(e.target.value)}
+                            style={{ marginBottom: 0, fontSize: 13 }}
+                          >
+                            <option value="">— 기본 캘린더 —</option>
+                            {gcalCalendars.map((cal) => (
+                              <option key={cal.id} value={cal.id}>
+                                {cal.summary}{cal.primary ? " (기본)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Timed events toggle */}
+                      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10 }}>
+                        <label
+                          onClick={() => setGcalShowTimed((p) => !p)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                        >
+                          <div style={{
+                            width: 36, height: 20, borderRadius: 10, flexShrink: 0, position: "relative",
+                            background: gcalShowTimed ? "#4285F4" : "#ccc", transition: "background 0.2s",
+                          }}>
+                            <div style={{
+                              position: "absolute", top: 3, left: gcalShowTimed ? 18 : 3,
+                              width: 14, height: 14, borderRadius: "50%", background: "white",
+                              transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                            }} />
+                          </div>
+                          <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>시간 지정 일정도 표시</span>
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 40 }}>
+                <button className="soft-btn secondary" onClick={() => setStep(1)} style={{ padding: "14px 28px" }}>이전</button>
+                <button className="soft-btn secondary" onClick={() => setStep(3)} style={{ padding: "14px 28px" }}>
+                  건너뛰기
+                </button>
+                <button className="soft-btn" onClick={() => setStep(3)} style={{ padding: "14px 48px" }}>
+                  다음: 디자인 설정 →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: 속성 설정 + 디자인 */}
+          {step === 3 && (
             <div style={{ animation: "fadeIn 0.5s", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
 
-              {/* 속성 설정 (Step 1에서 이동) */}
+              {/* 속성 설정 */}
               <div style={{ width: "100%", background: "#FFF8FB", border: "1px solid #F0D0DA", borderRadius: 16, padding: "20px 24px" }}>
                 <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: "#555", display: "flex", alignItems: "center", gap: 8 }}>
                   <CalendarDays size={15} color="#E8A8C0" /> {selectedDbName} — 속성 설정
@@ -425,15 +913,35 @@ export default function OnboardingPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>날짜 속성</label>
-                    <input className="soft-input" value={settings.dateProperty}
-                      onChange={(e) => update("dateProperty", e.target.value)}
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                    {dateProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.dateProperty}
+                        onChange={(e) => update("dateProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        {dateProperties.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.dateProperty}
+                        onChange={(e) => update("dateProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
                   </div>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>제목 속성</label>
-                    <input className="soft-input" value={settings.titleProperty}
-                      onChange={(e) => update("titleProperty", e.target.value)}
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                    {titleProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.titleProperty}
+                        onChange={(e) => update("titleProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        {titleProperties.map((p) => (
+                          <option key={p.name} value={p.name}>{p.name}{p.type !== "title" ? ` (${p.type})` : ""}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.titleProperty}
+                        onChange={(e) => update("titleProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
                   </div>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
@@ -444,15 +952,25 @@ export default function OnboardingPage() {
                         onChange={(e) => update("groupProperty", e.target.value)}
                         style={{ marginBottom: 0, fontSize: 13 }}>
                         <option value="">— 없음 —</option>
-                        {groupableProperties.map((p) => (
-                          <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
-                        ))}
+                        {groupableProperties.map((p) => {
+                          const hasOpts = p.type === "select" || p.type === "multi_select";
+                          return (
+                            <option key={p.name} value={p.name}>
+                              {hasOpts ? "🎨 " : ""}{p.name} ({p.type})
+                            </option>
+                          );
+                        })}
                       </select>
                     ) : (
                       <input className="soft-input" value={settings.groupProperty}
                         onChange={(e) => update("groupProperty", e.target.value)}
                         placeholder="예: 팀, 카테고리"
                         style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
+                    {settings.groupProperty && !selectOptions[settings.groupProperty] && (
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                        🎨 표시 속성 선택 시 팔레트에서 옵션별 색상 지정 가능
+                      </div>
                     )}
                   </div>
                 </div>
@@ -549,20 +1067,66 @@ export default function OnboardingPage() {
                   </div>
                 </div>
                 <div style={{ background: "#F0F4F8", padding: "16px 20px", borderRadius: 16, marginBottom: 28 }}>
-                  <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>프로젝트 바 색상 팔레트</div>
-                  <div className="bar-colors-grid">
-                    {settings.barColors.map((color, i) => (
-                      <div key={i} className="bar-color-item">
-                        <input type="color" className="bar-color-input" value={color}
-                          onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
-                        <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {(() => {
+                    const groupOpts = settings.groupProperty ? (selectOptions[settings.groupProperty] ?? []) : [];
+                    const hasGroupOpts = groupOpts.length > 0;
+                    return (
+                      <>
+                        <div className="section-title" style={{ fontSize: 13, marginBottom: hasGroupOpts ? 12 : 4 }}>
+                          프로젝트 바 색상 팔레트
+                          {hasGroupOpts && (
+                            <span style={{ fontSize: 11, fontWeight: 400, color: "#999", marginLeft: 6 }}>
+                              ({settings.groupProperty})
+                            </span>
+                          )}
+                        </div>
+                        {!hasGroupOpts && settings.groupProperty && (
+                          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>
+                            그룹 속성이 select/multi_select 타입이 아니어서 번호로 표시됩니다.
+                          </div>
+                        )}
+                        {!settings.groupProperty && Object.keys(selectOptions).length > 0 && (
+                          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>
+                            그룹 속성을 🎨 타입으로 선택하면 옵션별 색상을 지정할 수 있습니다.
+                          </div>
+                        )}
+                        <div className="bar-colors-grid">
+                          {hasGroupOpts ? (
+                            groupOpts.map((optName, i) => {
+                              const fallback = DEFAULT_BAR_COLORS[i % DEFAULT_BAR_COLORS.length];
+                              const color = groupColorOverrides[optName] || settings.barColors[i] || fallback;
+                              return (
+                                <div key={optName} className="bar-color-item">
+                                  <input type="color" className="bar-color-input" value={color}
+                                    onChange={(e) => {
+                                      const next = [...settings.barColors];
+                                      while (next.length <= i) next.push(DEFAULT_BAR_COLORS[next.length % DEFAULT_BAR_COLORS.length]);
+                                      next[i] = e.target.value;
+                                      update("barColors", next);
+                                      setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
+                                      setSelectedTheme("");
+                                    }} />
+                                  <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            settings.barColors.map((color, i) => (
+                              <div key={i} className="bar-color-item">
+                                <input type="color" className="bar-color-input" value={color}
+                                  onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
+                                <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "center", width: "100%", maxWidth: 560, paddingBottom: 60 }}>
-                <button className="soft-btn secondary" onClick={() => setStep(1)} style={{ padding: "14px 28px" }}>이전</button>
+                <button className="soft-btn secondary" onClick={() => setStep(2)} style={{ padding: "14px 28px" }}>이전</button>
                 <button className="soft-btn" onClick={handleGenerate} disabled={generating} style={{ flex: 1 }}>
                   {generating ? "생성 중..." : "완료 및 생성"}
                 </button>
@@ -578,10 +1142,15 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div style={{ textAlign: "center", animation: "fadeIn 0.5s", padding: "40px 0" }}>
               <div style={{ width: 80, height: 80, background: "#E8F5E9", borderRadius: "50%", margin: "0 auto 24px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>🎉</div>
               <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12, color: "#333" }}>설치가 완료되었습니다!</h2>
+              {gcalToken && gcalSelectedIds.size > 0 && (
+                <p style={{ marginBottom: 16, color: "#4285F4", fontSize: 14, fontWeight: 600 }}>
+                  🗓 Google Calendar {gcalSelectedIds.size}개 캘린더가 연결됩니다.
+                </p>
+              )}
               <p style={{ marginBottom: 40, color: "#666", fontSize: 16 }}>아래 링크를 노션에 &apos;임베드&apos;하여 사용하세요.</p>
               <div style={{ background: "#F9F9F9", border: "1px solid #eee", borderRadius: 12, padding: 20, maxWidth: 500, margin: "0 auto 30px" }}>
                 <div style={{ fontSize: 13, color: "#888", marginBottom: 8, textAlign: "left", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
@@ -594,11 +1163,16 @@ export default function OnboardingPage() {
                   </button>
                 </div>
               </div>
+              {gcalToken && (
+                <p style={{ fontSize: 13, color: "#888", marginBottom: 24 }}>
+                  ※ 위젯에서 Google Calendar 버튼을 클릭해 로그인하면 선택한 캘린더가 자동으로 표시됩니다.
+                </p>
+              )}
               <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
                 <button className="soft-btn" onClick={() => window.open(generatedUrl, "_blank")}>
                   <Monitor size={16} /> 캘린더 확인
                 </button>
-                <button className="soft-btn secondary" onClick={() => setStep(2)}>
+                <button className="soft-btn secondary" onClick={() => setStep(3)}>
                   <Palette size={16} /> 디자인 수정하기
                 </button>
               </div>
@@ -612,5 +1186,13 @@ export default function OnboardingPage() {
         <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
       </div>
     </>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={null}>
+      <OnboardingPageInner />
+    </Suspense>
   );
 }
