@@ -97,75 +97,61 @@ export async function POST(req: NextRequest) {
           const rollupMeta = rollupProp.rollup as { relation_property_name?: string } | undefined;
           const relPropName = rollupMeta?.relation_property_name;
 
-          if (relPropName && props[relPropName]) {
-            // Record the underlying relation property name immediately (independent of DB access)
+          if (relPropName) {
+            // Record the underlying relation property name immediately
             rollupRelationProps[groupProperty] = relPropName;
 
             // Build title→pageId from current DB pages (no linked DB access needed)
             type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
             const pages = await notion.databases.query({ database_id: databaseId, page_size: 100 });
             const titleMap: Record<string, string> = {};
+            const titleSet = new Set<string>();
             for (const page of pages.results) {
               const pageProps = (page as { properties: Record<string, unknown> }).properties;
               const rollupPageProp = pageProps[groupProperty] as Record<string, unknown> | undefined;
               const relPageProp = pageProps[relPropName] as Record<string, unknown> | undefined;
-              if (!rollupPageProp || !relPageProp) continue;
 
-              // Get the rollup display value
-              const r = rollupPageProp.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
+              // Extract rollup display value
               let displayVal = "";
-              if (r?.type === "number" && r.number != null) {
-                displayVal = String(r.number);
-              } else if (r?.type === "array") {
-                for (const item of r.array ?? []) {
-                  let itemVal = "";
-                  if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
-                  else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
-                  else if (item.type === "select") itemVal = item.select?.name ?? "";
-                  else if (item.type === "multi_select") itemVal = item.multi_select?.map((s) => s.name).filter(Boolean).join(", ") ?? "";
-                  else if (item.type === "number" && item.number != null) itemVal = String(item.number);
-                  if (itemVal.trim()) { displayVal = itemVal.trim(); break; }
+              if (rollupPageProp) {
+                const r = rollupPageProp.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
+                if (r?.type === "number" && r.number != null) {
+                  displayVal = String(r.number);
+                } else if (r?.type === "array") {
+                  for (const item of r.array ?? []) {
+                    let itemVal = "";
+                    if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
+                    else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
+                    else if (item.type === "select") itemVal = item.select?.name ?? "";
+                    else if (item.type === "multi_select") itemVal = item.multi_select?.map((s) => s.name).filter(Boolean).join(", ") ?? "";
+                    else if (item.type === "number" && item.number != null) itemVal = String(item.number);
+                    if (itemVal.trim()) { displayVal = itemVal.trim(); break; }
+                  }
                 }
               }
 
-              // Get the related page ID from the relation property
-              const rels = relPageProp.relation as { id: string }[] | undefined;
-              if (displayVal && rels?.[0]?.id && !titleMap[displayVal]) {
-                titleMap[displayVal] = rels[0].id;
+              if (displayVal) {
+                titleSet.add(displayVal);
+                // Map to relation page ID if relation property is present
+                const rels = relPageProp?.relation as { id: string }[] | undefined;
+                if (rels?.[0]?.id && !titleMap[displayVal]) {
+                  titleMap[displayVal] = rels[0].id;
+                }
               }
             }
 
             if (Object.keys(titleMap).length > 0) {
               selectOptions[groupProperty] = Object.keys(titleMap);
               relationOptionIds[groupProperty] = titleMap;
-            } else {
-              // Fallback: just collect unique display values (no pageIds)
-              const valSet = new Set(Object.keys(titleMap));
-              for (const page of pages.results) {
-                const pageProps = (page as { properties: Record<string, unknown> }).properties;
-                const p = pageProps[groupProperty] as Record<string, unknown> | undefined;
-                if (!p) continue;
-                const r = p.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
-                let val = "";
-                if (r?.type === "number" && r.number != null) val = String(r.number);
-                else if (r?.type === "array") {
-                  for (const item of r.array ?? []) {
-                    let itemVal = "";
-                    if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
-                    else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
-                    else if (item.type === "select") itemVal = item.select?.name ?? "";
-                    if (itemVal.trim()) { itemVal = itemVal.trim(); break; }
-                  }
-                }
-                if (val.trim()) valSet.add(val.trim());
-              }
-              if (valSet.size > 0) selectOptions[groupProperty] = [...valSet];
+            } else if (titleSet.size > 0) {
+              // No pageIds found but we have display values
+              selectOptions[groupProperty] = [...titleSet];
             }
           } else {
-            // No relation_property_name found: just collect unique rollup display values
+            // No relation_property_name in schema — collect unique rollup display values
+            type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
             const pages = await notion.databases.query({ database_id: databaseId, page_size: 100 });
             const valSet = new Set<string>();
-            type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
             for (const page of pages.results) {
               const pageProps = (page as { properties: Record<string, unknown> }).properties;
               const p = pageProps[groupProperty] as Record<string, unknown> | undefined;
