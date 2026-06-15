@@ -187,6 +187,14 @@ export default function CalendarWidget({
     if (savedCalOrder) {
       try { setGcalCalendarOrder(JSON.parse(savedCalOrder)); } catch { /* ignore */ }
     }
+
+    const savedRowOverrides = localStorage.getItem("pcal_row_overrides");
+    if (savedRowOverrides) {
+      try {
+        const obj = JSON.parse(savedRowOverrides) as Record<string, number>;
+        setRowOverrides(new Map(Object.entries(obj).map(([k, v]) => [k, v])));
+      } catch { /* ignore */ }
+    }
   }, [initialGcalToken, initialGcalColorOverrides, initialGroupColors, initialGcalShowTimed]);
 
   // Fetch calendar list when token changes
@@ -586,7 +594,6 @@ export default function CalendarWidget({
     const d = new Date(year, month + delta, 1);
     setCenterYear(d.getFullYear());
     setCenterMonth(d.getMonth());
-    setRowOverrides(new Map());
   };
 
   const navigateWeek = (delta: number) => {
@@ -596,7 +603,6 @@ export default function CalendarWidget({
       d.setDate(d.getDate() + delta * 7);
       return formatDate(d);
     });
-    setRowOverrides(new Map());
   };
 
   const formatShortDate = (dateStr: string) => {
@@ -1043,11 +1049,22 @@ export default function CalendarWidget({
                         } else if (project) {
                           // Notion event drag (local only)
                           if (mode === "move" && dragGrabDate.current) {
+                            // Compute target row from drop Y position
+                            const zoneRect = e.currentTarget.getBoundingClientRect();
+                            const dropRow = Math.max(0, Math.floor((e.clientY - zoneRect.top) / ROW_HEIGHT));
                             const delta = daysBetween(dragGrabDate.current, dateStr);
                             if (delta !== 0) {
                               setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: addDays(project.startDate, delta), endDate: addDays(project.endDate, delta) }); return next; });
-                              setRowOverrides((prev) => { const next = new Map(prev); next.delete(sourceId); return next; });
                             }
+                            // Always update row override (even if date didn't change)
+                            setRowOverrides((prev) => {
+                              const next = new Map(prev);
+                              next.set(sourceId, dropRow);
+                              const obj: Record<string, number> = {};
+                              next.forEach((v, k) => { obj[k] = v; });
+                              localStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
+                              return next;
+                            });
                           } else if (mode === "resize-end") {
                             const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
                             setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
