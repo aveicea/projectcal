@@ -146,6 +146,9 @@ export default function CalendarWidget({
   const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
   // Per-group Notion color overrides (groupValue → hex)
   const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
+  // Custom calendar display order (calId[])
+  const [gcalCalendarOrder, setGcalCalendarOrder] = useState<string[]>([]);
+  const panelDragCalId = useRef<string | null>(null);
 
   // Load token + synced IDs from localStorage (or from URL-embedded token)
   useEffect(() => {
@@ -178,6 +181,11 @@ export default function CalendarWidget({
       try { setGroupColorOverrides({ ...JSON.parse(savedGroupColors), ...initialGroupColors }); } catch { if (initialGroupColors) setGroupColorOverrides(initialGroupColors); }
     } else if (initialGroupColors) {
       setGroupColorOverrides(initialGroupColors);
+    }
+
+    const savedCalOrder = localStorage.getItem("pcal_gcal_order");
+    if (savedCalOrder) {
+      try { setGcalCalendarOrder(JSON.parse(savedCalOrder)); } catch { /* ignore */ }
     }
   }, [initialGcalToken, initialGcalColorOverrides, initialGroupColors, initialGcalShowTimed]);
 
@@ -793,19 +801,43 @@ export default function CalendarWidget({
               </div>
             ) : (
               <div style={{ maxHeight: 320, overflowY: "auto" }}>
-                {gcalCalendars.map((cal) => {
+                {[...gcalCalendars].sort((a, b) => {
+                  const ai = gcalCalendarOrder.indexOf(a.id);
+                  const bi = gcalCalendarOrder.indexOf(b.id);
+                  if (ai === -1 && bi === -1) return 0;
+                  if (ai === -1) return 1;
+                  if (bi === -1) return -1;
+                  return ai - bi;
+                }).map((cal) => {
                   const isSelected = selectedCalendarIds.has(cal.id);
                   const calColor = gcalColorOverrides[cal.id] || cal.backgroundColor || GCAL_DEFAULT_COLOR;
                   return (
                     <div
                       key={cal.id}
+                      draggable
+                      onDragStart={() => { panelDragCalId.current = cal.id; }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (!panelDragCalId.current || panelDragCalId.current === cal.id) return;
+                        const allIds = [...gcalCalendars].sort((a, b) => {
+                          const ai = gcalCalendarOrder.indexOf(a.id); const bi = gcalCalendarOrder.indexOf(b.id);
+                          if (ai === -1 && bi === -1) return 0; if (ai === -1) return 1; if (bi === -1) return -1; return ai - bi;
+                        }).map((c) => c.id);
+                        const from = allIds.indexOf(panelDragCalId.current!);
+                        const to = allIds.indexOf(cal.id);
+                        if (from === -1 || to === -1) return;
+                        allIds.splice(from, 1); allIds.splice(to, 0, panelDragCalId.current!);
+                        setGcalCalendarOrder(allIds);
+                        localStorage.setItem("pcal_gcal_order", JSON.stringify(allIds));
+                        panelDragCalId.current = null;
+                      }}
                       onClick={() => toggleCalendar(cal.id)}
                       style={{
                         padding: "5px 10px",
                         display: "flex",
                         alignItems: "center",
                         gap: 7,
-                        cursor: "pointer",
+                        cursor: "grab",
                         background: "transparent",
                         transition: "background 0.1s",
                       }}
@@ -1200,7 +1232,7 @@ export default function CalendarWidget({
                                   transform: "translateY(-50%)",
                                   fontSize: 7,
                                   padding: "1px 4px",
-                                  background: syncedIds.has(seg.id) ? "#34A853" : GCAL_DEFAULT_COLOR,
+                                  background: syncedIds.has(seg.id) ? "#34A853" : primaryColor,
                                   color: "white",
                                   border: "none",
                                   borderRadius: 3,
