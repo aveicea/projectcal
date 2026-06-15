@@ -24,6 +24,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const dateProperties = Object.entries(props)
+      .filter(([, p]) => p.type === "date")
+      .map(([name]) => name);
+
+    const titleProperties = Object.entries(props)
+      .filter(([, p]) => p.type === "title" || p.type === "rich_text")
+      .map(([name, p]) => ({ name, type: p.type }));
+
     const groupableTypes = ["select", "multi_select", "rich_text", "formula", "title", "rollup", "relation"];
     const groupableProperties = Object.entries(props)
       .filter(([, p]) => groupableTypes.includes(p.type))
@@ -41,7 +49,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, groupableProperties, selectOptions } });
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, selectOptions } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });

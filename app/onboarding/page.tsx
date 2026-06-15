@@ -75,6 +75,8 @@ export default function OnboardingPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
+  const [dateProperties, setDateProperties] = useState<string[]>([]);
+  const [titleProperties, setTitleProperties] = useState<{ name: string; type: string }[]>([]);
   const [selectedDbName, setSelectedDbName] = useState("");
   const [selectedTheme, setSelectedTheme] = useState("파스텔🌸");
   const [generatedUrl, setGeneratedUrl] = useState("");
@@ -201,6 +203,8 @@ export default function OnboardingPage() {
           groupProperty: "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
+        setDateProperties(json.data.dateProperties ?? []);
+        setTitleProperties(json.data.titleProperties ?? []);
         setSelectOptions(json.data.selectOptions ?? {});
       }
     } catch (e) {
@@ -735,15 +739,35 @@ export default function OnboardingPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>날짜 속성</label>
-                    <input className="soft-input" value={settings.dateProperty}
-                      onChange={(e) => update("dateProperty", e.target.value)}
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                    {dateProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.dateProperty}
+                        onChange={(e) => update("dateProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        {dateProperties.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.dateProperty}
+                        onChange={(e) => update("dateProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
                   </div>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>제목 속성</label>
-                    <input className="soft-input" value={settings.titleProperty}
-                      onChange={(e) => update("titleProperty", e.target.value)}
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                    {titleProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.titleProperty}
+                        onChange={(e) => update("titleProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        {titleProperties.map((p) => (
+                          <option key={p.name} value={p.name}>{p.name}{p.type !== "title" ? ` (${p.type})` : ""}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.titleProperty}
+                        onChange={(e) => update("titleProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
                   </div>
                   <div>
                     <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
