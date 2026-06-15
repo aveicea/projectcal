@@ -136,6 +136,7 @@ function OnboardingPageInner() {
         if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
       }
       if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
+      loadDbPropertiesQuiet(json.token ?? "", json.dbId ?? "", json.groupProp ?? "");
       setStep(3);
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,6 +180,7 @@ function OnboardingPageInner() {
         if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
       }
       if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
+      loadDbPropertiesQuiet(json.token ?? "", json.dbId ?? "", json.groupProp ?? "");
       setImportUrl("");
       setErrorMsg(null);
       setStep(2);
@@ -266,6 +268,27 @@ function OnboardingPageInner() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadDbPropertiesQuiet = async (apiKey: string, databaseId: string, groupProperty?: string) => {
+    if (!apiKey || !databaseId) return;
+    try {
+      const res = await fetch("/api/analyze-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, databaseId }),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setGroupableProperties(json.data.groupableProperties ?? []);
+        setDateProperties(json.data.dateProperties ?? []);
+        setTitleProperties(json.data.titleProperties ?? []);
+        setSelectOptions(json.data.selectOptions ?? {});
+        if (groupProperty) {
+          setSettings((prev) => ({ ...prev, groupProperty }));
+        }
+      }
+    } catch { /* silent */ }
   };
 
   // ── Google Calendar ───────────────────────────────────────────────────────
@@ -950,38 +973,62 @@ function OnboardingPageInner() {
                   </div>
                 </div>
                 <div style={{ background: "#F0F4F8", padding: "16px 20px", borderRadius: 16, marginBottom: 28 }}>
-                  <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>프로젝트 바 색상 팔레트</div>
-                  <div className="bar-colors-grid">
-                    {settings.barColors.map((color, i) => (
-                      <div key={i} className="bar-color-item">
-                        <input type="color" className="bar-color-input" value={color}
-                          onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
-                        <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Notion group color overrides (shown when groupProperty is select/multi_select with known options) */}
-                  {settings.groupProperty && selectOptions[settings.groupProperty] && selectOptions[settings.groupProperty].length > 0 && (
-                    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #dde" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 10 }}>
-                        그룹별 색상 ({settings.groupProperty})
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8 }}>
-                        {selectOptions[settings.groupProperty].map((optName) => (
-                          <div key={optName} className="bar-color-item">
-                            <input
-                              type="color"
-                              className="bar-color-input"
-                              value={groupColorOverrides[optName] || settings.barColors[0] || "#FFB3BA"}
-                              onChange={(e) => setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }))}
-                            />
-                            <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{optName}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {(() => {
+                    const groupOpts = settings.groupProperty ? (selectOptions[settings.groupProperty] ?? []) : [];
+                    const hasGroupOpts = groupOpts.length > 0;
+                    return (
+                      <>
+                        <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
+                          프로젝트 바 색상 팔레트
+                          {hasGroupOpts && (
+                            <span style={{ fontSize: 11, fontWeight: 400, color: "#999", marginLeft: 6 }}>
+                              ({settings.groupProperty})
+                            </span>
+                          )}
+                        </div>
+                        <div className="bar-colors-grid">
+                          {hasGroupOpts ? (
+                            <>
+                              {groupOpts.map((optName, i) => {
+                                const color = groupColorOverrides[optName] || settings.barColors[i] || DEFAULT_BAR_COLORS[i] || "#FFB3BA";
+                                return (
+                                  <div key={optName} className="bar-color-item">
+                                    <input type="color" className="bar-color-input" value={color}
+                                      onChange={(e) => {
+                                        const next = [...settings.barColors];
+                                        next[i] = e.target.value;
+                                        update("barColors", next);
+                                        setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
+                                        setSelectedTheme("");
+                                      }} />
+                                    <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
+                                  </div>
+                                );
+                              })}
+                              {settings.barColors.slice(groupOpts.length).map((color, j) => {
+                                const i = groupOpts.length + j;
+                                return (
+                                  <div key={`extra-${i}`} className="bar-color-item">
+                                    <input type="color" className="bar-color-input" value={color}
+                                      onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
+                                    <span style={{ fontSize: 10, color: "#bbb" }}>#{i + 1}</span>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          ) : (
+                            settings.barColors.map((color, i) => (
+                              <div key={i} className="bar-color-item">
+                                <input type="color" className="bar-color-input" value={color}
+                                  onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
+                                <span style={{ fontSize: 10, color: "#888" }}>#{i + 1}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "center", width: "100%", maxWidth: 560, paddingBottom: 60 }}>
