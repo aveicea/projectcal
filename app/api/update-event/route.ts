@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       | { multi_select: { name: string }[] }
       | { status: { name: string } }
       | { rich_text: { text: { content: string } }[] }
+      | { title: { text: { content: string } }[] }
       | { relation: { id: string }[] };
     let propValue: PropValue;
     if (propType === "multi_select") {
@@ -21,6 +22,8 @@ export async function POST(req: NextRequest) {
       propValue = { status: { name: value } };
     } else if (propType === "rich_text") {
       propValue = { rich_text: [{ text: { content: value } }] };
+    } else if (propType === "title") {
+      propValue = { title: [{ text: { content: value } }] };
     } else if (propType === "relation") {
       propValue = { relation: [{ id: value }] };
     } else {
