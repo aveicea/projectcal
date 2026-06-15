@@ -103,46 +103,66 @@ function OnboardingPageInner() {
   useEffect(() => {
     const fromParam = searchParams.get("from");
     if (!fromParam) return;
-    try {
-      let base64 = fromParam.replace(/-/g, "+").replace(/_/g, "/");
-      while (base64.length % 4) base64 += "=";
-      const raw = atob(base64);
-      const bytes = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-      const json = JSON.parse(new TextDecoder().decode(bytes));
-      setSettings((prev) => ({
-        ...prev,
-        apiKey: json.token ?? prev.apiKey,
-        databaseId: json.dbId ?? prev.databaseId,
-        dateProperty: json.dateProp ?? prev.dateProperty,
-        titleProperty: json.titleProp ?? prev.titleProperty,
-        groupProperty: json.groupProp ?? prev.groupProperty,
-        primaryColor: json.primaryColor ?? prev.primaryColor,
-        backgroundColor: json.backgroundColor ?? prev.backgroundColor,
-        backgroundOpacity: json.backgroundOpacity ?? prev.backgroundOpacity,
-        fontFamily: json.fontFamily ?? prev.fontFamily,
-        barColors: Array.isArray(json.barColors) ? json.barColors : prev.barColors,
-        labelColor: json.labelColor ?? prev.labelColor,
-        multiRow: json.multiRow ?? prev.multiRow,
-        darkMode: json.darkMode ?? prev.darkMode,
-        weekView: json.weekView ?? prev.weekView,
-      }));
-      if (json.gcalToken) {
-        setGcalToken(json.gcalToken);
-        if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
-        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId);
-        if (json.gcalShowTimed) setGcalShowTimed(true);
-        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors);
-        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
-      }
-      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
-      loadDbPropertiesQuiet(json.token ?? "", json.dbId ?? "", json.groupProp ?? "");
-      setStep(3);
-    } catch { /* ignore */ }
+    const run = async () => {
+      try {
+        let base64 = fromParam.replace(/-/g, "+").replace(/_/g, "/");
+        while (base64.length % 4) base64 += "=";
+        const raw = atob(base64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const json = JSON.parse(new TextDecoder().decode(bytes));
+        const apiKey = (json.token as string) ?? "";
+        const databaseId = (json.dbId as string) ?? "";
+        const groupProperty = (json.groupProp as string) ?? "";
+        setSettings((prev) => ({
+          ...prev,
+          apiKey,
+          databaseId,
+          dateProperty: (json.dateProp as string) ?? prev.dateProperty,
+          titleProperty: (json.titleProp as string) ?? prev.titleProperty,
+          groupProperty,
+          primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
+          backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
+          backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
+          fontFamily: (json.fontFamily as string) ?? prev.fontFamily,
+          barColors: Array.isArray(json.barColors) ? json.barColors as string[] : prev.barColors,
+          labelColor: (json.labelColor as string) ?? prev.labelColor,
+          multiRow: (json.multiRow as boolean) ?? prev.multiRow,
+          darkMode: (json.darkMode as boolean) ?? prev.darkMode,
+          weekView: (json.weekView as boolean) ?? prev.weekView,
+        }));
+        if (json.gcalToken) {
+          setGcalToken(json.gcalToken as string);
+          if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
+          if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
+          if (json.gcalShowTimed) setGcalShowTimed(true);
+          if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
+          if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
+        }
+        if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
+        setStep(3);
+        // Fetch DB properties directly (don't rely on later-defined helpers)
+        if (apiKey && databaseId) {
+          const res = await fetch("/api/analyze-database", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey, databaseId }),
+          });
+          const data = await res.json();
+          if (data.success && data.data) {
+            setGroupableProperties(data.data.groupableProperties ?? []);
+            setDateProperties(data.data.dateProperties ?? []);
+            setTitleProperties(data.data.titleProperties ?? []);
+            setSelectOptions(data.data.selectOptions ?? {});
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    run();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleImportUrl = () => {
+  const handleImportUrl = async () => {
     try {
       const trimmed = importUrl.trim();
       const cfgPart = trimmed.includes("/u/") ? trimmed.split("/u/")[1].split("?")[0] : trimmed;
@@ -153,37 +173,54 @@ function OnboardingPageInner() {
       const bytes = new Uint8Array(raw.length);
       for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
       const json = JSON.parse(new TextDecoder().decode(bytes));
+      const apiKey = (json.token as string) ?? "";
+      const databaseId = (json.dbId as string) ?? "";
+      const groupProperty = (json.groupProp as string) ?? "";
 
       setSettings((prev) => ({
         ...prev,
-        apiKey: json.token ?? prev.apiKey,
-        databaseId: json.dbId ?? prev.databaseId,
-        dateProperty: json.dateProp ?? prev.dateProperty,
-        titleProperty: json.titleProp ?? prev.titleProperty,
-        groupProperty: json.groupProp ?? prev.groupProperty,
-        primaryColor: json.primaryColor ?? prev.primaryColor,
-        backgroundColor: json.backgroundColor ?? prev.backgroundColor,
-        backgroundOpacity: json.backgroundOpacity ?? prev.backgroundOpacity,
-        fontFamily: json.fontFamily ?? prev.fontFamily,
-        barColors: Array.isArray(json.barColors) ? json.barColors : prev.barColors,
-        labelColor: json.labelColor ?? prev.labelColor,
-        multiRow: json.multiRow ?? prev.multiRow,
-        darkMode: json.darkMode ?? prev.darkMode,
-        weekView: json.weekView ?? prev.weekView,
+        apiKey,
+        databaseId,
+        dateProperty: (json.dateProp as string) ?? prev.dateProperty,
+        titleProperty: (json.titleProp as string) ?? prev.titleProperty,
+        groupProperty,
+        primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
+        backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
+        backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
+        fontFamily: (json.fontFamily as string) ?? prev.fontFamily,
+        barColors: Array.isArray(json.barColors) ? json.barColors as string[] : prev.barColors,
+        labelColor: (json.labelColor as string) ?? prev.labelColor,
+        multiRow: (json.multiRow as boolean) ?? prev.multiRow,
+        darkMode: (json.darkMode as boolean) ?? prev.darkMode,
+        weekView: (json.weekView as boolean) ?? prev.weekView,
       }));
       if (json.gcalToken) {
-        setGcalToken(json.gcalToken);
+        setGcalToken(json.gcalToken as string);
         if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
-        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId);
+        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
         if (json.gcalShowTimed) setGcalShowTimed(true);
-        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors);
-        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
+        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
+        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
       }
-      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
-      loadDbPropertiesQuiet(json.token ?? "", json.dbId ?? "", json.groupProp ?? "");
+      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
       setImportUrl("");
       setErrorMsg(null);
       setStep(2);
+      // Fetch DB properties directly
+      if (apiKey && databaseId) {
+        const res = await fetch("/api/analyze-database", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey, databaseId }),
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setGroupableProperties(data.data.groupableProperties ?? []);
+          setDateProperties(data.data.dateProperties ?? []);
+          setTitleProperties(data.data.titleProperties ?? []);
+          setSelectOptions(data.data.selectOptions ?? {});
+        }
+      }
     } catch {
       setErrorMsg("올바른 위젯 URL이 아닙니다.");
     }
