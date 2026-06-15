@@ -1354,7 +1354,7 @@ export default function CalendarWidget({
           </div>
         )}
 
-        <button onClick={fetchProjects} aria-label="Refresh"
+        <button onClick={() => { setRowOverrides(new Map()); localStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
           style={{
             cursor: "pointer", color: primaryColor, display: "flex",
             justifyContent: "center", alignItems: "center", transition: "all .2s",
