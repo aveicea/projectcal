@@ -1006,10 +1006,9 @@ export default function CalendarWidget({
                   <div key={dateStr} style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
                     width: dayWidth, flexShrink: 0,
-                    opacity: isCurrWeek ? 1 : 0.55,
                   }}>
                     {/* Date header */}
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55 }}>
                       {isMonthBoundary ? (
                         <span style={{
                           fontSize: 7, fontWeight: 700, color: primaryColor, letterSpacing: 0.5,
@@ -1120,6 +1119,12 @@ export default function CalendarWidget({
                         const isDragging = dragId === seg.id;
                         const isUpdating = gcalUpdatingId === seg.id;
                         const row = effectiveRowMap.get(seg.id) ?? 0;
+                        const currWeekFirst = weekDays[0]?.dateStr;
+                        const currWeekLast = weekDays[weekDays.length - 1]?.dateStr;
+                        const spansCurrentWeek = weekView && !isCurrWeek && currWeekFirst && currWeekLast
+                          ? seg.startDate <= currWeekLast && seg.endDate >= currWeekFirst
+                          : true;
+                        const segOpacity = spansCurrentWeek ? 1 : 0.55;
                         const zIdx = isHovered ? (seg.isStart ? 210 : 200) : hoveredId ? 0 : (seg.isStart ? 2 : 1);
 
                         const isMonthStart = isMonthBoundary && dateStr > seg.startDate;
@@ -1167,8 +1172,7 @@ export default function CalendarWidget({
                               left: 0, zIndex: zIdx, backgroundColor: bgC,
                               top: `${row * ROW_HEIGHT}px`,
                               ...shapeStyle,
-                              ...(isDragging ? { opacity: 0.3 } : {}),
-                              ...(isUpdating ? { opacity: 0.6 } : {}),
+                              ...(isDragging ? { opacity: 0.3 } : isUpdating ? { opacity: 0.6 } : { opacity: segOpacity }),
                               ...gcalOutlineStyle,
                             }}
                             draggable={!isUpdating}
