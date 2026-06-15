@@ -638,7 +638,7 @@ export default function CalendarWidget({
     return o ? { ...p, ...o } : p;
   });
 
-  const allDisplayProjects: AnySegment[] = [...effectiveNotionProjects, ...effectiveGCalProjects];
+  const allDisplayProjects: AnySegment[] = [...effectiveGCalProjects, ...effectiveNotionProjects];
 
   const rowMap = assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
