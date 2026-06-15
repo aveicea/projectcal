@@ -133,11 +133,13 @@ function OnboardingPageInner() {
         }));
         if (json.gcalToken) {
           setGcalToken(json.gcalToken as string);
-          if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
+          const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
+          if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
           if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
           if (json.gcalShowTimed) setGcalShowTimed(true);
           if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
           if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
+          loadGCalCalendars(json.gcalToken as string, restoredIds);
         }
         if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
         setStep(3);
@@ -196,11 +198,13 @@ function OnboardingPageInner() {
       }));
       if (json.gcalToken) {
         setGcalToken(json.gcalToken as string);
-        if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
+        const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
+        if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
         if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
         if (json.gcalShowTimed) setGcalShowTimed(true);
         if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors as Record<string, string>);
         if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors as Record<string, string>);
+        loadGCalCalendars(json.gcalToken as string, restoredIds);
       }
       if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors as Record<string, string>);
       setImportUrl("");
@@ -403,14 +407,16 @@ function OnboardingPageInner() {
     window.addEventListener("message", handleMessage);
   };
 
-  const loadGCalCalendars = async (token: string) => {
+  const loadGCalCalendars = async (token: string, keepSelection?: Set<string>) => {
     setGcalLoading(true);
     try {
       const res = await fetch(`/api/gcal?token=${encodeURIComponent(token)}&action=list`);
       const data = await res.json();
       if (Array.isArray(data.items)) {
         setGcalCalendars(data.items);
-        setGcalSelectedIds(new Set(data.items.map((c: GCalCalendar) => c.id)));
+        if (!keepSelection || keepSelection.size === 0) {
+          setGcalSelectedIds(new Set(data.items.map((c: GCalCalendar) => c.id)));
+        }
       }
     } catch (e) {
       console.error("GCal calendar list error:", e);
