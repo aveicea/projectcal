@@ -127,7 +127,7 @@ export default function CalendarWidget({
   const [dateOverrides, setDateOverrides] = useState<Map<string, { startDate: string; endDate: string }>>(new Map());
   const [dropDateStr, setDropDateStr] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, text: "", color: "" });
-  const [createInput, setCreateInput] = useState<{ dateStr: string; title: string } | null>(null);
+  const [createInput, setCreateInput] = useState<{ dateStr: string; title: string; row: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
@@ -1077,14 +1077,16 @@ export default function CalendarWidget({
                     {/* Drop zone */}
                     <div
                       style={{
-                        height: `${totalRows * ROW_HEIGHT}px`, width: "100%", position: "relative",
+                        height: `${Math.max(totalRows, (createInput?.dateStr === dateStr ? createInput.row + 1 : 0)) * ROW_HEIGHT}px`, width: "100%", position: "relative",
                         background: isColDrop ? hexToRgba(primaryColor, 0.12) : "transparent",
                         transition: "background 0.1s",
                         borderRadius: 4,
                       }}
                       onDoubleClick={(e) => {
                         if ((e.target as HTMLElement) === e.currentTarget) {
-                          setCreateInput({ dateStr, title: "" });
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const row = Math.max(0, Math.floor((e.clientY - rect.top) / ROW_HEIGHT));
+                          setCreateInput({ dateStr, title: "", row });
                         }
                       }}
                       onDragOver={(e) => {
@@ -1354,6 +1356,56 @@ export default function CalendarWidget({
                           </div>
                         );
                       })}
+                      {createInput?.dateStr === dateStr && (
+                        <div style={{
+                          position: "absolute",
+                          top: `${createInput.row * ROW_HEIGHT}px`,
+                          left: 2, right: 2, height: BAR_HEIGHT,
+                          borderRadius: 4,
+                          background: hexToRgba(primaryColor, 0.18),
+                          border: `1.5px solid ${primaryColor}`,
+                          display: "flex", alignItems: "center",
+                          zIndex: 500,
+                        }}>
+                          <input
+                            autoFocus
+                            placeholder="제목..."
+                            value={createInput.title}
+                            onChange={(e) => setCreateInput((p) => p ? { ...p, title: e.target.value } : null)}
+                            onBlur={() => setCreateInput(null)}
+                            onKeyDown={async (e) => {
+                              if (e.key === "Escape") { setCreateInput(null); return; }
+                              if (e.key === "Enter" && createInput.title.trim()) {
+                                e.preventDefault();
+                                const t = createInput.title.trim();
+                                setCreateInput(null);
+                                setCreating(true);
+                                try {
+                                  await fetch("/api/create-event", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      apiKey: config?.notionConfig.apiKey,
+                                      databaseId: config?.notionConfig.databaseId,
+                                      titleProperty: config?.notionConfig.titleProperty,
+                                      dateProperty: config?.notionConfig.dateProperty,
+                                      title: t,
+                                      startDate: dateStr,
+                                      endDate: dateStr,
+                                    }),
+                                  });
+                                  fetchProjects();
+                                } catch { /* ignore */ } finally { setCreating(false); }
+                              }
+                            }}
+                            style={{
+                              background: "transparent", border: "none", outline: "none",
+                              width: "100%", padding: "0 5px", fontSize: 10,
+                              color: darkMode ? "#eee" : "#444", fontWeight: 600,
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1386,55 +1438,6 @@ export default function CalendarWidget({
         </div>
       )}
 
-      {createInput && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center",
-          background: "rgba(0,0,0,0.15)",
-        }} onClick={() => setCreateInput(null)}>
-          <div style={{
-            background: "#fff", borderRadius: 12, padding: "18px 20px", boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
-            minWidth: 260, display: "flex", flexDirection: "column", gap: 10,
-          }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: primaryColor }}>{createInput.dateStr} 일정 추가</div>
-            <input
-              autoFocus
-              placeholder="일정 제목 입력..."
-              value={createInput.title}
-              onChange={(e) => setCreateInput((prev) => prev ? { ...prev, title: e.target.value } : null)}
-              onKeyDown={async (e) => {
-                if (e.key === "Escape") { setCreateInput(null); return; }
-                if (e.key === "Enter" && createInput.title.trim()) {
-                  setCreating(true);
-                  try {
-                    await fetch("/api/create-event", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        apiKey: config?.notionConfig.apiKey,
-                        databaseId: config?.notionConfig.databaseId,
-                        titleProperty: config?.notionConfig.titleProperty,
-                        dateProperty: config?.notionConfig.dateProperty,
-                        title: createInput.title.trim(),
-                        startDate: createInput.dateStr,
-                        endDate: createInput.dateStr,
-                      }),
-                    });
-                    setCreateInput(null);
-                    fetchProjects();
-                  } catch { /* ignore */ } finally {
-                    setCreating(false);
-                  }
-                }
-              }}
-              style={{
-                border: `1.5px solid ${primaryColor}`, borderRadius: 7, padding: "7px 10px",
-                fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box",
-              }}
-            />
-            <div style={{ fontSize: 10, color: "#aaa" }}>Enter로 저장, Esc로 취소{creating ? " · 저장 중..." : ""}</div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
