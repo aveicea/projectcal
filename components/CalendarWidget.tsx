@@ -137,6 +137,7 @@ export default function CalendarWidget({
   // For rollup group props: the underlying relation property name to actually write
   const [groupWriteProp, setGroupWriteProp] = useState<string>("");
   const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
+  const [editingTitle, setEditingTitle] = useState<{ id: string; value: string } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   const dragGrabDate = useRef<string | null>(null);
@@ -1326,7 +1327,12 @@ export default function CalendarWidget({
                               ...(isDragging ? { opacity: 0.3 } : isUpdating ? { opacity: 0.6 } : { opacity: segOpacity }),
                               ...gcalOutlineStyle,
                             }}
-                            onDoubleClick={(e) => e.stopPropagation()}
+                            onDoubleClick={(e) => {
+                              if (!seg.isGCal && seg.isStart) {
+                                e.stopPropagation();
+                                setEditingTitle({ id: seg.id, value: seg.title });
+                              }
+                            }}
                             onClick={(e) => {
                               if (!seg.isGCal && config?.notionConfig.groupProperty && groupOptions.length > 0 && seg.isStart) {
                                 e.stopPropagation();
@@ -1419,8 +1425,65 @@ export default function CalendarWidget({
                               />
                             )}
 
-                            {/* Label */}
-                            {showLabel && (
+                            {/* Label / inline title editor */}
+                            {showLabel && editingTitle?.id === seg.id ? (
+                              <input
+                                autoFocus
+                                value={editingTitle.value}
+                                onChange={(e) => setEditingTitle({ id: seg.id, value: e.target.value })}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape") { setEditingTitle(null); return; }
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    const newTitle = editingTitle.value.trim();
+                                    setEditingTitle(null);
+                                    if (!newTitle || newTitle === seg.title) return;
+                                    setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: newTitle } : p));
+                                    fetch("/api/update-event", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        apiKey: config?.notionConfig.apiKey,
+                                        pageId: seg.id,
+                                        property: config?.notionConfig.titleProperty,
+                                        value: newTitle,
+                                        propType: "title",
+                                      }),
+                                    }).then((r) => r.json()).then((d) => {
+                                      if (!d.success) setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p));
+                                    }).catch(() => setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p)));
+                                  }
+                                }}
+                                onBlur={() => {
+                                  const newTitle = editingTitle.value.trim();
+                                  setEditingTitle(null);
+                                  if (!newTitle || newTitle === seg.title) return;
+                                  setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: newTitle } : p));
+                                  fetch("/api/update-event", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      apiKey: config?.notionConfig.apiKey,
+                                      pageId: seg.id,
+                                      property: config?.notionConfig.titleProperty,
+                                      value: newTitle,
+                                      propType: "title",
+                                    }),
+                                  }).then((r) => r.json()).then((d) => {
+                                    if (!d.success) setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p));
+                                  }).catch(() => setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p)));
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  position: "absolute", left: 2,
+                                  height: "100%", boxSizing: "border-box", padding: "0 6px",
+                                  width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
+                                  background: "rgba(0,0,0,0.35)", border: "none", outline: "none",
+                                  color: labelColor, fontSize: 9, fontWeight: "bold",
+                                  borderRadius: 2, zIndex: 300,
+                                }}
+                              />
+                            ) : showLabel && (
                               <span style={{
                                 position: "absolute", left: 2, display: "flex",
                                 justifyContent: "flex-start", alignItems: "center",
