@@ -626,7 +626,7 @@ function OnboardingPageInner() {
           background: #E8A8C0; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
 
-        .bar-colors-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+        .bar-colors-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
         .bar-color-item {
           display: flex; align-items: center; gap: 6px; padding: 6px 8px;
           background: #fff; border: 1px solid #f0f0f0; border-radius: 8px;
@@ -1086,34 +1086,24 @@ function OnboardingPageInner() {
                         )}
                         <div className="bar-colors-grid">
                           {hasGroupOpts ? (
-                            <>
-                              {groupOpts.map((optName, i) => {
-                                const color = groupColorOverrides[optName] || settings.barColors[i] || DEFAULT_BAR_COLORS[i] || "#FFB3BA";
-                                return (
-                                  <div key={optName} className="bar-color-item">
-                                    <input type="color" className="bar-color-input" value={color}
-                                      onChange={(e) => {
-                                        const next = [...settings.barColors];
-                                        next[i] = e.target.value;
-                                        update("barColors", next);
-                                        setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
-                                        setSelectedTheme("");
-                                      }} />
-                                    <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
-                                  </div>
-                                );
-                              })}
-                              {settings.barColors.slice(groupOpts.length).map((color, j) => {
-                                const i = groupOpts.length + j;
-                                return (
-                                  <div key={`extra-${i}`} className="bar-color-item">
-                                    <input type="color" className="bar-color-input" value={color}
-                                      onChange={(e) => { const next = [...settings.barColors]; next[i] = e.target.value; update("barColors", next); setSelectedTheme(""); }} />
-                                    <span style={{ fontSize: 10, color: "#bbb" }}>#{i + 1}</span>
-                                  </div>
-                                );
-                              })}
-                            </>
+                            groupOpts.map((optName, i) => {
+                              const fallback = DEFAULT_BAR_COLORS[i % DEFAULT_BAR_COLORS.length];
+                              const color = groupColorOverrides[optName] || settings.barColors[i] || fallback;
+                              return (
+                                <div key={optName} className="bar-color-item">
+                                  <input type="color" className="bar-color-input" value={color}
+                                    onChange={(e) => {
+                                      const next = [...settings.barColors];
+                                      while (next.length <= i) next.push(DEFAULT_BAR_COLORS[next.length % DEFAULT_BAR_COLORS.length]);
+                                      next[i] = e.target.value;
+                                      update("barColors", next);
+                                      setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
+                                      setSelectedTheme("");
+                                    }} />
+                                  <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
+                                </div>
+                              );
+                            })
                           ) : (
                             settings.barColors.map((color, i) => (
                               <div key={i} className="bar-color-item">
