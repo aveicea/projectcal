@@ -133,6 +133,7 @@ export default function CalendarWidget({
   const [dropOnHeader, setDropOnHeader] = useState(false);
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
   const [groupPropType, setGroupPropType] = useState<string>("select");
+  const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
@@ -571,6 +572,9 @@ export default function CalendarWidget({
         }
         const gpMeta = d.data?.groupableProperties?.find((p: { name: string; type: string }) => p.name === gp);
         if (gpMeta) setGroupPropType(gpMeta.type);
+        if (d.success && d.data?.relationOptionIds?.[gp]) {
+          setGroupOptionIds(d.data.relationOptionIds[gp]);
+        }
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1543,10 +1547,18 @@ export default function CalendarWidget({
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = isCurrent ? hexToRgba(primaryColor, 0.08) : "transparent"; }}
                   onClick={() => {
                     const pid = eventPopup.id;
-                    const prev = eventPopup.group;
+                    const prevGroup = eventPopup.group;
+                    const prevProject = projects.find((p) => p.id === pid);
+                    const prevColor = prevProject?.color;
+                    const newColor = groupColorOverrides[opt]
+                      || (!opt.trim() ? groupColorOverrides["__none__"] : undefined)
+                      || barColors[groupOptions.indexOf(opt) % barColors.length]
+                      || prevColor;
                     setEventPopup(null);
-                    // Optimistic update
-                    setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: opt } : p));
+                    // Optimistic update: group + color
+                    setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: opt, color: newColor ?? p.color } : p));
+                    // For relation props, send the linked page ID; for others, send the display value
+                    const valueToSend = groupPropType === "relation" ? (groupOptionIds[opt] ?? opt) : opt;
                     fetch("/api/update-event", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
@@ -1554,13 +1566,15 @@ export default function CalendarWidget({
                         apiKey: config?.notionConfig.apiKey,
                         pageId: pid,
                         property: config?.notionConfig.groupProperty,
-                        value: opt,
+                        value: valueToSend,
                         propType: groupPropType,
                       }),
                     })
                       .then((r) => r.json())
-                      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prev } : p)); })
-                      .catch(() => setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prev } : p)));
+                      .then((d) => {
+                        if (!d.success) setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prevGroup, color: prevColor ?? p.color } : p));
+                      })
+                      .catch(() => setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prevGroup, color: prevColor ?? p.color } : p)));
                   }}
                 >
                   {opt}
