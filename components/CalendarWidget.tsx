@@ -1015,7 +1015,12 @@ export default function CalendarWidget({
 
                         const gcalColor = seg.color || GCAL_DEFAULT_COLOR;
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
-                          boxShadow: `inset 0 0 0 1.5px rgba(255,255,255,0.45)`,
+                          boxShadow: [
+                            "inset 0 1.5px 0 0 rgba(255,255,255,0.45)",
+                            "inset 0 -1.5px 0 0 rgba(255,255,255,0.45)",
+                            seg.isStart ? "inset 1.5px 0 0 0 rgba(255,255,255,0.45)" : "",
+                            seg.isEnd ? "inset -1.5px 0 0 0 rgba(255,255,255,0.45)" : "",
+                          ].filter(Boolean).join(", "),
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};
 
