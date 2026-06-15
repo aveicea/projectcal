@@ -73,9 +73,21 @@ export async function POST(req: NextRequest) {
             const f = p.formula as { type?: string; string?: string; number?: number } | undefined;
             val = String(f?.string ?? f?.number ?? "");
           } else if (propType === "rollup") {
-            const r = p.rollup as { type?: string; number?: number; array?: { title?: { plain_text?: string }[] }[] } | undefined;
-            if (r?.type === "number" && r.number != null) val = String(r.number);
-            else if (r?.type === "array" && r.array?.[0]) val = r.array[0].title?.[0]?.plain_text ?? "";
+            type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
+            const r = p.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
+            if (r?.type === "number" && r.number != null) {
+              val = String(r.number);
+            } else if (r?.type === "array") {
+              for (const item of r.array ?? []) {
+                let itemVal = "";
+                if (item.type === "select") itemVal = item.select?.name ?? "";
+                else if (item.type === "multi_select") itemVal = item.multi_select?.map((s) => s.name).filter(Boolean).join(", ") ?? "";
+                else if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
+                else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
+                else if (item.type === "number" && item.number != null) itemVal = String(item.number);
+                if (itemVal.trim()) { val = itemVal.trim(); break; }
+              }
+            }
           }
           if (val.trim()) valSet.add(val.trim());
         }
