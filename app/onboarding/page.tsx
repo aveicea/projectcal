@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
@@ -67,7 +68,7 @@ function makePreviewProjects(multiRow: boolean): Project[] {
   return base;
 }
 
-export default function OnboardingPage() {
+function OnboardingPageInner() {
   // step: 1=Notion, 2=GCal, 3=Design, 4=Done
   const [step, setStep] = useState(1);
   const [generating, setGenerating] = useState(false);
@@ -89,12 +90,56 @@ export default function OnboardingPage() {
   const [gcalSyncTargetCalId, setGcalSyncTargetCalId] = useState("");
   const [gcalShowTimed, setGcalShowTimed] = useState(false);
   const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
+  const [gcalBorderColorOverrides, setGcalBorderColorOverrides] = useState<Record<string, string>>({});
 
   // Notion group color state
   const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
   const [selectOptions, setSelectOptions] = useState<Record<string, string[]>>({});
 
   const [importUrl, setImportUrl] = useState("");
+  const searchParams = useSearchParams();
+
+  // Auto-import from ?from= query param
+  useEffect(() => {
+    const fromParam = searchParams.get("from");
+    if (!fromParam) return;
+    try {
+      let base64 = fromParam.replace(/-/g, "+").replace(/_/g, "/");
+      while (base64.length % 4) base64 += "=";
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const json = JSON.parse(new TextDecoder().decode(bytes));
+      setSettings((prev) => ({
+        ...prev,
+        apiKey: json.token ?? prev.apiKey,
+        databaseId: json.dbId ?? prev.databaseId,
+        dateProperty: json.dateProp ?? prev.dateProperty,
+        titleProperty: json.titleProp ?? prev.titleProperty,
+        groupProperty: json.groupProp ?? prev.groupProperty,
+        primaryColor: json.primaryColor ?? prev.primaryColor,
+        backgroundColor: json.backgroundColor ?? prev.backgroundColor,
+        backgroundOpacity: json.backgroundOpacity ?? prev.backgroundOpacity,
+        fontFamily: json.fontFamily ?? prev.fontFamily,
+        barColors: Array.isArray(json.barColors) ? json.barColors : prev.barColors,
+        labelColor: json.labelColor ?? prev.labelColor,
+        multiRow: json.multiRow ?? prev.multiRow,
+        darkMode: json.darkMode ?? prev.darkMode,
+        weekView: json.weekView ?? prev.weekView,
+      }));
+      if (json.gcalToken) {
+        setGcalToken(json.gcalToken);
+        if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
+        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId);
+        if (json.gcalShowTimed) setGcalShowTimed(true);
+        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors);
+        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
+      }
+      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
+      setStep(3);
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleImportUrl = () => {
     try {
@@ -125,6 +170,15 @@ export default function OnboardingPage() {
         darkMode: json.darkMode ?? prev.darkMode,
         weekView: json.weekView ?? prev.weekView,
       }));
+      if (json.gcalToken) {
+        setGcalToken(json.gcalToken);
+        if (Array.isArray(json.gcalCalIds)) setGcalSelectedIds(new Set(json.gcalCalIds as string[]));
+        if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId);
+        if (json.gcalShowTimed) setGcalShowTimed(true);
+        if (json.gcalCalColors && typeof json.gcalCalColors === "object") setGcalColorOverrides(json.gcalCalColors);
+        if (json.gcalBorderColors && typeof json.gcalBorderColors === "object") setGcalBorderColorOverrides(json.gcalBorderColors);
+      }
+      if (json.groupColors && typeof json.groupColors === "object") setGroupColorOverrides(json.groupColors);
       setImportUrl("");
       setErrorMsg(null);
       setStep(2);
@@ -307,6 +361,7 @@ export default function OnboardingPage() {
         if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
         if (gcalShowTimed) cfg.gcalShowTimed = true;
         if (Object.keys(gcalColorOverrides).length > 0) cfg.gcalCalColors = gcalColorOverrides;
+        if (Object.keys(gcalBorderColorOverrides).length > 0) cfg.gcalBorderColors = gcalBorderColorOverrides;
       }
       if (Object.keys(groupColorOverrides).length > 0) cfg.groupColors = groupColorOverrides;
       const encoded = btoa(
@@ -640,7 +695,7 @@ export default function OnboardingPage() {
                               className={`cal-card${isSelected ? " selected" : ""}`}
                               onClick={() => toggleGCalCalendar(cal.id)}
                             >
-                              {/* Color picker */}
+                              {/* Fill color picker */}
                               <input
                                 type="color"
                                 value={color}
@@ -650,6 +705,18 @@ export default function OnboardingPage() {
                                   setGcalColorOverrides((prev) => ({ ...prev, [cal.id]: e.target.value }));
                                 }}
                                 style={{ width: 18, height: 18, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                              />
+                              {/* Border color picker */}
+                              <input
+                                type="color"
+                                title="테두리 색"
+                                value={gcalBorderColorOverrides[cal.id] || "#ffffff"}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setGcalBorderColorOverrides((prev) => ({ ...prev, [cal.id]: e.target.value }));
+                                }}
+                                style={{ width: 18, height: 18, padding: 0, border: "1px dashed #aaa", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
                               />
                               <div style={{ flex: 1, overflow: "hidden" }}>
                                 <div style={{ fontWeight: 600, fontSize: 13, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -978,5 +1045,13 @@ export default function OnboardingPage() {
         <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
       </div>
     </>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={null}>
+      <OnboardingPageInner />
+    </Suspense>
   );
 }

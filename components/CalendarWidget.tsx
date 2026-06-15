@@ -79,7 +79,9 @@ interface CalendarWidgetProps {
   initialGcalToken?: string;
   initialGcalShowTimed?: boolean;
   initialGcalColorOverrides?: Record<string, string>;
+  initialGcalBorderColorOverrides?: Record<string, string>;
   initialGroupColors?: Record<string, string>;
+  widgetConfigStr?: string;
 }
 
 const DAY_WIDTH = 25;
@@ -99,7 +101,9 @@ export default function CalendarWidget({
   initialGcalToken,
   initialGcalShowTimed,
   initialGcalColorOverrides,
+  initialGcalBorderColorOverrides,
   initialGroupColors,
+  widgetConfigStr,
 }: CalendarWidgetProps) {
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
@@ -142,8 +146,9 @@ export default function CalendarWidget({
   const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
   // Whether to include timed events (not just all-day events)
   const [gcalShowTimed, setGcalShowTimed] = useState(false);
-  // Per-calendar color overrides (calId → hex)
+  // Per-calendar color overrides (calId → hex fill, border)
   const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
+  const [gcalBorderColorOverrides, setGcalBorderColorOverrides] = useState<Record<string, string>>({});
   // Per-group Notion color overrides (groupValue → hex)
   const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
   // Custom calendar display order (calId[])
@@ -174,6 +179,13 @@ export default function CalendarWidget({
       try { setGcalColorOverrides({ ...JSON.parse(savedCalColors), ...initialGcalColorOverrides }); } catch { if (initialGcalColorOverrides) setGcalColorOverrides(initialGcalColorOverrides); }
     } else if (initialGcalColorOverrides) {
       setGcalColorOverrides(initialGcalColorOverrides);
+    }
+
+    const savedBorderColors = localStorage.getItem("pcal_gcal_border_colors");
+    if (savedBorderColors) {
+      try { setGcalBorderColorOverrides({ ...JSON.parse(savedBorderColors), ...initialGcalBorderColorOverrides }); } catch { if (initialGcalBorderColorOverrides) setGcalBorderColorOverrides(initialGcalBorderColorOverrides); }
+    } else if (initialGcalBorderColorOverrides) {
+      setGcalBorderColorOverrides(initialGcalBorderColorOverrides);
     }
 
     const savedGroupColors = localStorage.getItem("pcal_group_colors");
@@ -759,7 +771,17 @@ export default function CalendarWidget({
                 }
               </button>
             )}
-            <span style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7 }}>PROJECT CAL</span>
+            {widgetConfigStr ? (
+              <a
+                href={`/onboarding?from=${widgetConfigStr}`}
+                title="설정 수정"
+                style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7, textDecoration: "none", cursor: "pointer" }}
+              >
+                PROJECT CAL
+              </a>
+            ) : (
+              <span style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7 }}>PROJECT CAL</span>
+            )}
           </span>
         </div>
 
@@ -850,7 +872,7 @@ export default function CalendarWidget({
                       onMouseEnter={(e) => (e.currentTarget.style.background = `${primaryColor}10`)}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
-                      {/* Color picker */}
+                      {/* Fill color picker */}
                       <input
                         type="color"
                         value={gcalColorOverrides[cal.id] || cal.backgroundColor || GCAL_DEFAULT_COLOR}
@@ -863,6 +885,23 @@ export default function CalendarWidget({
                         }}
                         style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
                       />
+                      {/* Border color picker */}
+                      <div
+                        title="테두리 색"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ position: "relative", width: 14, height: 14, flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                      >
+                        <input
+                          type="color"
+                          value={gcalBorderColorOverrides[cal.id] || "#ffffff"}
+                          onChange={(e) => {
+                            const next = { ...gcalBorderColorOverrides, [cal.id]: e.target.value };
+                            setGcalBorderColorOverrides(next);
+                            localStorage.setItem("pcal_gcal_border_colors", JSON.stringify(next));
+                          }}
+                          style={{ width: 14, height: 14, padding: 0, border: "1px dashed #aaa", borderRadius: "50%", cursor: "pointer", opacity: 1 }}
+                        />
+                      </div>
                       {/* Calendar name */}
                       <span style={{
                         flex: 1,
@@ -1101,12 +1140,13 @@ export default function CalendarWidget({
                             : { width: "100%" };
 
                         const gcalColor = seg.color || GCAL_DEFAULT_COLOR;
+                        const gcalBorderColor = (seg.gcalCalendarId && gcalBorderColorOverrides[seg.gcalCalendarId]) || "rgba(255,255,255,0.45)";
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
                           boxShadow: [
-                            "inset 0 1.5px 0 0 rgba(255,255,255,0.45)",
-                            "inset 0 -1.5px 0 0 rgba(255,255,255,0.45)",
-                            seg.isStart ? "inset 1.5px 0 0 0 rgba(255,255,255,0.45)" : "",
-                            seg.isEnd ? "inset -1.5px 0 0 0 rgba(255,255,255,0.45)" : "",
+                            `inset 0 1.5px 0 0 ${gcalBorderColor}`,
+                            `inset 0 -1.5px 0 0 ${gcalBorderColor}`,
+                            seg.isStart ? `inset 1.5px 0 0 0 ${gcalBorderColor}` : "",
+                            seg.isEnd ? `inset -1.5px 0 0 0 ${gcalBorderColor}` : "",
                           ].filter(Boolean).join(", "),
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};

@@ -29,6 +29,7 @@ interface Config {
   gcalToken?: string;
   gcalShowTimed?: boolean;
   gcalCalColors?: Record<string, string>;
+  gcalBorderColors?: Record<string, string>;
   groupColors?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -70,6 +71,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
       gcalToken: json.gcalToken || undefined,
       gcalShowTimed: json.gcalShowTimed ?? false,
       gcalCalColors: json.gcalCalColors && typeof json.gcalCalColors === "object" ? json.gcalCalColors as Record<string, string> : undefined,
+      gcalBorderColors: json.gcalBorderColors && typeof json.gcalBorderColors === "object" ? json.gcalBorderColors as Record<string, string> : undefined,
       groupColors: json.groupColors && typeof json.groupColors === "object" ? json.groupColors as Record<string, string> : undefined,
       createdAt: "",
       updatedAt: "",
@@ -127,7 +129,9 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         initialGcalToken={config.gcalToken}
         initialGcalShowTimed={config.gcalShowTimed}
         initialGcalColorOverrides={config.gcalCalColors}
+        initialGcalBorderColorOverrides={config.gcalBorderColors}
         initialGroupColors={config.groupColors}
+        widgetConfigStr={cfg}
       />
     </>
   );
