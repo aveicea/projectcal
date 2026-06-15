@@ -618,6 +618,7 @@ export default function CalendarWidget({
               dbId: config.notionConfig.databaseId,
               dateProp: config.notionConfig.dateProperty,
               titleProp: config.notionConfig.titleProperty,
+              ...(config.notionConfig.groupProperty ? { groupProp: config.notionConfig.groupProperty } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
