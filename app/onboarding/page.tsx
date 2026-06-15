@@ -146,7 +146,7 @@ function OnboardingPageInner() {
           const res = await fetch("/api/analyze-database", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ apiKey, databaseId }),
+            body: JSON.stringify({ apiKey, databaseId, groupProperty: groupProperty || undefined }),
           });
           const data = await res.json();
           if (data.success && data.data) {
@@ -211,7 +211,7 @@ function OnboardingPageInner() {
         const res = await fetch("/api/analyze-database", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey, databaseId }),
+          body: JSON.stringify({ apiKey, databaseId, groupProperty: groupProperty || undefined }),
         });
         const data = await res.json();
         if (data.success && data.data) {
@@ -269,6 +269,25 @@ function OnboardingPageInner() {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.apiKey, settings.databaseId]);
+
+  // When user picks a group property, fetch unique values from pages if not already in selectOptions
+  useEffect(() => {
+    if (!settings.groupProperty || !settings.apiKey || !settings.databaseId) return;
+    if (selectOptions[settings.groupProperty]) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: settings.apiKey, databaseId: settings.databaseId, groupProperty: settings.groupProperty }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data?.selectOptions) {
+          setSelectOptions((prev) => ({ ...prev, ...json.data.selectOptions }));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.groupProperty]);
 
   // ── Notion ────────────────────────────────────────────────────────────────
 
