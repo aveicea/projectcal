@@ -211,6 +211,28 @@ function OnboardingPageInner() {
     setErrorMsg(null);
   };
 
+  // Auto-load DB properties whenever apiKey+databaseId are set and selectOptions is empty
+  useEffect(() => {
+    if (!settings.apiKey || !settings.databaseId) return;
+    if (Object.keys(selectOptions).length > 0) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: settings.apiKey, databaseId: settings.databaseId }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          setGroupableProperties(json.data.groupableProperties ?? []);
+          setDateProperties(json.data.dateProperties ?? []);
+          setTitleProperties(json.data.titleProperties ?? []);
+          setSelectOptions(json.data.selectOptions ?? {});
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.apiKey, settings.databaseId]);
+
   // ── Notion ────────────────────────────────────────────────────────────────
 
   const handleLoadDatabases = async () => {
