@@ -927,15 +927,25 @@ function OnboardingPageInner() {
                         onChange={(e) => update("groupProperty", e.target.value)}
                         style={{ marginBottom: 0, fontSize: 13 }}>
                         <option value="">— 없음 —</option>
-                        {groupableProperties.map((p) => (
-                          <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
-                        ))}
+                        {groupableProperties.map((p) => {
+                          const hasOpts = p.type === "select" || p.type === "multi_select";
+                          return (
+                            <option key={p.name} value={p.name}>
+                              {hasOpts ? "🎨 " : ""}{p.name} ({p.type})
+                            </option>
+                          );
+                        })}
                       </select>
                     ) : (
                       <input className="soft-input" value={settings.groupProperty}
                         onChange={(e) => update("groupProperty", e.target.value)}
                         placeholder="예: 팀, 카테고리"
                         style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
+                    {settings.groupProperty && !selectOptions[settings.groupProperty] && (
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                        🎨 표시 속성 선택 시 팔레트에서 옵션별 색상 지정 가능
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1037,7 +1047,7 @@ function OnboardingPageInner() {
                     const hasGroupOpts = groupOpts.length > 0;
                     return (
                       <>
-                        <div className="section-title" style={{ fontSize: 13, marginBottom: 12 }}>
+                        <div className="section-title" style={{ fontSize: 13, marginBottom: hasGroupOpts ? 12 : 4 }}>
                           프로젝트 바 색상 팔레트
                           {hasGroupOpts && (
                             <span style={{ fontSize: 11, fontWeight: 400, color: "#999", marginLeft: 6 }}>
@@ -1045,6 +1055,16 @@ function OnboardingPageInner() {
                             </span>
                           )}
                         </div>
+                        {!hasGroupOpts && settings.groupProperty && (
+                          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>
+                            그룹 속성이 select/multi_select 타입이 아니어서 번호로 표시됩니다.
+                          </div>
+                        )}
+                        {!settings.groupProperty && Object.keys(selectOptions).length > 0 && (
+                          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>
+                            그룹 속성을 🎨 타입으로 선택하면 옵션별 색상을 지정할 수 있습니다.
+                          </div>
+                        )}
                         <div className="bar-colors-grid">
                           {hasGroupOpts ? (
                             <>
