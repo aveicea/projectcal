@@ -134,6 +134,8 @@ export default function CalendarWidget({
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
   const [groupPropType, setGroupPropType] = useState<string>("select");
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
+  // For rollup group props: the underlying relation property name to actually write
+  const [groupWriteProp, setGroupWriteProp] = useState<string>("");
   const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
@@ -574,6 +576,9 @@ export default function CalendarWidget({
         if (gpMeta) setGroupPropType(gpMeta.type);
         if (d.success && d.data?.relationOptionIds?.[gp]) {
           setGroupOptionIds(d.data.relationOptionIds[gp]);
+        }
+        if (d.success && d.data?.rollupRelationProps?.[gp]) {
+          setGroupWriteProp(d.data.rollupRelationProps[gp]);
         }
       })
       .catch(() => {});
@@ -1557,17 +1562,21 @@ export default function CalendarWidget({
                     setEventPopup(null);
                     // Optimistic update: group + color
                     setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: opt, color: newColor ?? p.color } : p));
-                    // For relation props, send the linked page ID; for others, send the display value
-                    const valueToSend = groupPropType === "relation" ? (groupOptionIds[opt] ?? opt) : opt;
+                    // For relation/rollup props, send the linked page ID; for others, send the display value
+                    const isRelationType = groupPropType === "relation" || groupPropType === "rollup";
+                    const valueToSend = isRelationType ? (groupOptionIds[opt] ?? opt) : opt;
+                    // For rollup, write to the underlying relation property instead
+                    const propToWrite = (groupPropType === "rollup" && groupWriteProp) ? groupWriteProp : config?.notionConfig.groupProperty;
+                    const propTypeToWrite = groupPropType === "rollup" ? "relation" : groupPropType;
                     fetch("/api/update-event", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
                         apiKey: config?.notionConfig.apiKey,
                         pageId: pid,
-                        property: config?.notionConfig.groupProperty,
+                        property: propToWrite,
                         value: valueToSend,
-                        propType: groupPropType,
+                        propType: propTypeToWrite,
                       }),
                     })
                       .then((r) => r.json())
