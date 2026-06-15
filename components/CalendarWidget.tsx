@@ -1143,10 +1143,10 @@ export default function CalendarWidget({
                         const gcalBorderColor = (seg.gcalCalendarId && gcalBorderColorOverrides[seg.gcalCalendarId]) || "rgba(255,255,255,0.45)";
                         const gcalOutlineStyle: React.CSSProperties = seg.isGCal ? {
                           boxShadow: [
-                            `inset 0 0.5px 0 0 ${gcalBorderColor}`,
-                            `inset 0 -0.5px 0 0 ${gcalBorderColor}`,
-                            seg.isStart ? `inset 0.5px 0 0 0 ${gcalBorderColor}` : "",
-                            seg.isEnd ? `inset -0.5px 0 0 0 ${gcalBorderColor}` : "",
+                            `inset 0 1px 0 0 ${gcalBorderColor}`,
+                            `inset 0 -1px 0 0 ${gcalBorderColor}`,
+                            seg.isStart ? `inset 1px 0 0 0 ${gcalBorderColor}` : "",
+                            seg.isEnd ? `inset -1px 0 0 0 ${gcalBorderColor}` : "",
                           ].filter(Boolean).join(", "),
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};
