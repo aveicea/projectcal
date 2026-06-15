@@ -78,6 +78,8 @@ interface CalendarWidgetProps {
   gcalSyncCalId?: string;
   initialGcalToken?: string;
   initialGcalShowTimed?: boolean;
+  initialGcalColorOverrides?: Record<string, string>;
+  initialGroupColors?: Record<string, string>;
 }
 
 const DAY_WIDTH = 25;
@@ -96,6 +98,8 @@ export default function CalendarWidget({
   gcalSyncCalId,
   initialGcalToken,
   initialGcalShowTimed,
+  initialGcalColorOverrides,
+  initialGroupColors,
 }: CalendarWidgetProps) {
   const [centerYear, setCenterYear] = useState<number | null>(null);
   const [centerMonth, setCenterMonth] = useState<number | null>(null);
@@ -138,6 +142,10 @@ export default function CalendarWidget({
   const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
   // Whether to include timed events (not just all-day events)
   const [gcalShowTimed, setGcalShowTimed] = useState(false);
+  // Per-calendar color overrides (calId → hex)
+  const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
+  // Per-group Notion color overrides (groupValue → hex)
+  const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
 
   // Load token + synced IDs from localStorage (or from URL-embedded token)
   useEffect(() => {
@@ -157,7 +165,21 @@ export default function CalendarWidget({
     const showTimed = localStorage.getItem("pcal_gcal_show_timed");
     if (showTimed === "true") setGcalShowTimed(true);
     else if (initialGcalShowTimed) setGcalShowTimed(true);
-  }, [initialGcalToken]);
+
+    const savedCalColors = localStorage.getItem("pcal_gcal_colors");
+    if (savedCalColors) {
+      try { setGcalColorOverrides({ ...JSON.parse(savedCalColors), ...initialGcalColorOverrides }); } catch { if (initialGcalColorOverrides) setGcalColorOverrides(initialGcalColorOverrides); }
+    } else if (initialGcalColorOverrides) {
+      setGcalColorOverrides(initialGcalColorOverrides);
+    }
+
+    const savedGroupColors = localStorage.getItem("pcal_group_colors");
+    if (savedGroupColors) {
+      try { setGroupColorOverrides({ ...JSON.parse(savedGroupColors), ...initialGroupColors }); } catch { if (initialGroupColors) setGroupColorOverrides(initialGroupColors); }
+    } else if (initialGroupColors) {
+      setGroupColorOverrides(initialGroupColors);
+    }
+  }, [initialGcalToken, initialGcalColorOverrides, initialGroupColors, initialGcalShowTimed]);
 
   // Fetch calendar list when token changes
   useEffect(() => {
@@ -270,7 +292,7 @@ export default function CalendarWidget({
     setGcalLoading(true);
 
     const calIds = [...selectedCalendarIds];
-    const colorMap = new Map(gcalCalendars.map((c) => [c.id, c.backgroundColor || GCAL_DEFAULT_COLOR]));
+    const colorMap = new Map(gcalCalendars.map((c) => [c.id, gcalColorOverrides[c.id] || c.backgroundColor || GCAL_DEFAULT_COLOR]));
 
     Promise.all(
       calIds.map(async (calId) => {
@@ -347,7 +369,7 @@ export default function CalendarWidget({
       });
 
     return () => { cancelled = true; };
-  }, [gcalToken, selectedCalendarIds, gcalCalendars, fetchStart, fetchEnd, gcalShowTimed]);
+  }, [gcalToken, selectedCalendarIds, gcalCalendars, fetchStart, fetchEnd, gcalShowTimed, gcalColorOverrides]);
 
   // ── GCal functions ────────────────────────────────────────────────────────
 
@@ -503,9 +525,17 @@ export default function CalendarWidget({
     setLoading(true);
     setError(null);
 
+    const applyGroupColors = (segs: ReturnType<typeof assignColors>) => {
+      if (Object.keys(groupColorOverrides).length === 0) return segs;
+      return segs.map((p) => ({
+        ...p,
+        color: (p.group && groupColorOverrides[p.group]) || p.color,
+      }));
+    };
+
     if (configId === "preview") {
       const raw = previewProjects ?? getPreviewProjects();
-      setProjects(assignColors(raw, barColors));
+      setProjects(applyGroupColors(assignColors(raw, barColors)));
       setLoading(false);
       return;
     }
@@ -528,7 +558,7 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
+        setProjects(json.success && json.data ? applyGroupColors(assignColors(json.data, barColors)) : []);
       } catch (e) {
         console.error(e);
         setError("프로젝트를 불러올 수 없습니다.");
@@ -540,7 +570,7 @@ export default function CalendarWidget({
     }
 
     setLoading(false);
-  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects]);
+  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects, groupColorOverrides]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
@@ -765,16 +795,16 @@ export default function CalendarWidget({
               <div style={{ maxHeight: 320, overflowY: "auto" }}>
                 {gcalCalendars.map((cal) => {
                   const isSelected = selectedCalendarIds.has(cal.id);
-                  const calColor = cal.backgroundColor || GCAL_DEFAULT_COLOR;
+                  const calColor = gcalColorOverrides[cal.id] || cal.backgroundColor || GCAL_DEFAULT_COLOR;
                   return (
                     <div
                       key={cal.id}
                       onClick={() => toggleCalendar(cal.id)}
                       style={{
-                        padding: "6px 12px",
+                        padding: "5px 10px",
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
+                        gap: 7,
                         cursor: "pointer",
                         background: "transparent",
                         transition: "background 0.1s",
@@ -782,12 +812,19 @@ export default function CalendarWidget({
                       onMouseEnter={(e) => (e.currentTarget.style.background = `${primaryColor}10`)}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
-                      {/* Calendar color dot */}
-                      <div style={{
-                        width: 10, height: 10, borderRadius: "50%",
-                        background: calColor, flexShrink: 0,
-                        opacity: isSelected ? 1 : 0.35,
-                      }} />
+                      {/* Color picker */}
+                      <input
+                        type="color"
+                        value={gcalColorOverrides[cal.id] || cal.backgroundColor || GCAL_DEFAULT_COLOR}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          const next = { ...gcalColorOverrides, [cal.id]: e.target.value };
+                          setGcalColorOverrides(next);
+                          localStorage.setItem("pcal_gcal_colors", JSON.stringify(next));
+                        }}
+                        style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                      />
                       {/* Calendar name */}
                       <span style={{
                         flex: 1,
@@ -796,6 +833,7 @@ export default function CalendarWidget({
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                         opacity: isSelected ? 1 : 0.5,
+                        fontSize: 10,
                       }}>
                         {cal.summary}
                         {cal.primary && <span style={{ marginLeft: 4, fontSize: 9, color: "#aaa" }}>(기본)</span>}
@@ -1082,7 +1120,7 @@ export default function CalendarWidget({
                                   position: "absolute", left: 0, top: 0, width: 7, height: "100%",
                                   cursor: "ew-resize", zIndex: 20,
                                   borderTopLeftRadius: 4, borderBottomLeftRadius: 4,
-                                  background: seg.isGCal ? hexToRgba(gcalColor, 0.25) : "rgba(255,255,255,0.25)",
+                                  background: "transparent",
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onDragStart={(e) => {
@@ -1110,7 +1148,7 @@ export default function CalendarWidget({
                                   position: "absolute", right: 0, top: 0, width: 7, height: "100%",
                                   cursor: "ew-resize", zIndex: 20,
                                   borderTopRightRadius: 4, borderBottomRightRadius: 4,
-                                  background: seg.isGCal ? hexToRgba(gcalColor, 0.25) : "rgba(255,255,255,0.25)",
+                                  background: "transparent",
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onDragStart={(e) => {

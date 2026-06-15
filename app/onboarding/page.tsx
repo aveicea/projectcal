@@ -86,6 +86,11 @@ export default function OnboardingPage() {
   const [gcalLoading, setGcalLoading] = useState(false);
   const [gcalSyncTargetCalId, setGcalSyncTargetCalId] = useState("");
   const [gcalShowTimed, setGcalShowTimed] = useState(false);
+  const [gcalColorOverrides, setGcalColorOverrides] = useState<Record<string, string>>({});
+
+  // Notion group color state
+  const [groupColorOverrides, setGroupColorOverrides] = useState<Record<string, string>>({});
+  const [selectOptions, setSelectOptions] = useState<Record<string, string[]>>({});
 
   const [importUrl, setImportUrl] = useState("");
 
@@ -196,6 +201,7 @@ export default function OnboardingPage() {
           groupProperty: "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
+        setSelectOptions(json.data.selectOptions ?? {});
       }
     } catch (e) {
       console.error(e);
@@ -296,7 +302,9 @@ export default function OnboardingPage() {
         if (gcalSelectedIds.size > 0) cfg.gcalCalIds = [...gcalSelectedIds];
         if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
         if (gcalShowTimed) cfg.gcalShowTimed = true;
+        if (Object.keys(gcalColorOverrides).length > 0) cfg.gcalCalColors = gcalColorOverrides;
       }
+      if (Object.keys(groupColorOverrides).length > 0) cfg.groupColors = groupColorOverrides;
       const encoded = btoa(
         Array.from(new TextEncoder().encode(JSON.stringify(cfg)))
           .map((b) => String.fromCharCode(b))
@@ -621,18 +629,24 @@ export default function OnboardingPage() {
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
                         {gcalCalendars.map((cal) => {
                           const isSelected = gcalSelectedIds.has(cal.id);
-                          const color = cal.backgroundColor || "#4285F4";
+                          const color = gcalColorOverrides[cal.id] || cal.backgroundColor || "#4285F4";
                           return (
                             <div
                               key={cal.id}
                               className={`cal-card${isSelected ? " selected" : ""}`}
                               onClick={() => toggleGCalCalendar(cal.id)}
                             >
-                              <div style={{
-                                width: 14, height: 14, borderRadius: "50%",
-                                background: color, flexShrink: 0,
-                                opacity: isSelected ? 1 : 0.35,
-                              }} />
+                              {/* Color picker */}
+                              <input
+                                type="color"
+                                value={color}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setGcalColorOverrides((prev) => ({ ...prev, [cal.id]: e.target.value }));
+                                }}
+                                style={{ width: 18, height: 18, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
+                              />
                               <div style={{ flex: 1, overflow: "hidden" }}>
                                 <div style={{ fontWeight: 600, fontSize: 13, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                   {cal.summary}
@@ -855,6 +869,28 @@ export default function OnboardingPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Notion group color overrides (shown when groupProperty is select/multi_select with known options) */}
+                  {settings.groupProperty && selectOptions[settings.groupProperty] && selectOptions[settings.groupProperty].length > 0 && (
+                    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #dde" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 10 }}>
+                        그룹별 색상 ({settings.groupProperty})
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8 }}>
+                        {selectOptions[settings.groupProperty].map((optName) => (
+                          <div key={optName} className="bar-color-item">
+                            <input
+                              type="color"
+                              className="bar-color-input"
+                              value={groupColorOverrides[optName] || settings.barColors[0] || "#FFB3BA"}
+                              onChange={(e) => setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }))}
+                            />
+                            <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{optName}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "center", width: "100%", maxWidth: 560, paddingBottom: 60 }}>

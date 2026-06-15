@@ -28,6 +28,8 @@ interface Config {
   gcalSyncCalId?: string;
   gcalToken?: string;
   gcalShowTimed?: boolean;
+  gcalCalColors?: Record<string, string>;
+  groupColors?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -67,6 +69,8 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
       gcalSyncCalId: json.gcalSyncCalId || undefined,
       gcalToken: json.gcalToken || undefined,
       gcalShowTimed: json.gcalShowTimed ?? false,
+      gcalCalColors: json.gcalCalColors && typeof json.gcalCalColors === "object" ? json.gcalCalColors as Record<string, string> : undefined,
+      groupColors: json.groupColors && typeof json.groupColors === "object" ? json.groupColors as Record<string, string> : undefined,
       createdAt: "",
       updatedAt: "",
     },
@@ -122,6 +126,8 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         gcalSyncCalId={config.gcalSyncCalId}
         initialGcalToken={config.gcalToken}
         initialGcalShowTimed={config.gcalShowTimed}
+        initialGcalColorOverrides={config.gcalCalColors}
+        initialGroupColors={config.groupColors}
       />
     </>
   );

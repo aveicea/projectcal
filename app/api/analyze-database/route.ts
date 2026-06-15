@@ -29,7 +29,19 @@ export async function POST(req: NextRequest) {
       .filter(([, p]) => groupableTypes.includes(p.type))
       .map(([name, p]) => ({ name, type: p.type }));
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, groupableProperties } });
+    const selectOptions: Record<string, string[]> = {};
+    for (const [name, prop] of Object.entries(props)) {
+      const tp = prop as Record<string, unknown>;
+      if (prop.type === "select") {
+        const opts = (tp.select as { options?: { name: string }[] })?.options;
+        if (opts) selectOptions[name] = opts.map((o) => o.name);
+      } else if (prop.type === "multi_select") {
+        const opts = (tp.multi_select as { options?: { name: string }[] })?.options;
+        if (opts) selectOptions[name] = opts.map((o) => o.name);
+      }
+    }
+
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, groupableProperties, selectOptions } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });
