@@ -385,7 +385,8 @@ function OnboardingPageInner() {
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
-      response_type: "token",
+      response_type: "code",
+      access_type: "offline",
       scope: "https://www.googleapis.com/auth/calendar",
       prompt: "consent",
     });

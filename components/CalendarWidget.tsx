@@ -165,6 +165,28 @@ export default function CalendarWidget({
   const [gcalCalendarOrder, setGcalCalendarOrder] = useState<string[]>([]);
   const panelDragCalId = useRef<string | null>(null);
 
+  // Refresh GCal access token using stored refresh token
+  const refreshGcalToken = async (): Promise<string | null> => {
+    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
+    if (!refreshToken) return null;
+    try {
+      const res = await fetch("/api/gcal-refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      const data = await res.json();
+      if (data.access_token) {
+        const expiry = Date.now() + (data.expires_in ?? 3600) * 1000 - 60000;
+        localStorage.setItem("pcal_gcal_token", data.access_token);
+        localStorage.setItem("pcal_gcal_expiry", String(expiry));
+        setGcalToken(data.access_token);
+        return data.access_token;
+      }
+    } catch { /* silent */ }
+    return null;
+  };
+
   // Load token + synced IDs from localStorage (or from URL-embedded token)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -172,6 +194,9 @@ export default function CalendarWidget({
     const expiry = localStorage.getItem("pcal_gcal_expiry");
     if (token && expiry && Date.now() < parseInt(expiry)) {
       setGcalToken(token);
+    } else if (localStorage.getItem("pcal_gcal_refresh_token")) {
+      // Access token expired but we have a refresh token — auto-refresh
+      refreshGcalToken();
     } else if (initialGcalToken) {
       // URL-embedded token (no expiry check — if expired, 401 handler will clear it)
       setGcalToken(initialGcalToken);
@@ -254,12 +279,16 @@ export default function CalendarWidget({
           }
         }
       })
-      .catch((e: unknown) => {
+      .catch(async (e: unknown) => {
         if ((e as Error).message === "401") {
-          setGcalToken(null);
-          localStorage.removeItem("pcal_gcal_token");
+          const newToken = await refreshGcalToken();
+          if (!newToken) {
+            setGcalToken(null);
+            localStorage.removeItem("pcal_gcal_token");
+          }
         }
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gcalToken]);
 
   const primaryColor = theme?.primaryColor ?? "#E8A8C0";
@@ -394,11 +423,14 @@ export default function CalendarWidget({
         setGcalSyncedNotionIds(syncedFromGCal);
         setGcalProjects(events);
       })
-      .catch((e: unknown) => {
+      .catch(async (e: unknown) => {
         if (cancelled) return;
         if ((e as Error).message === "401") {
-          setGcalToken(null);
-          localStorage.removeItem("pcal_gcal_token");
+          const newToken = await refreshGcalToken();
+          if (!newToken) {
+            setGcalToken(null);
+            localStorage.removeItem("pcal_gcal_token");
+          }
         }
         console.error("GCal fetch error:", e);
       })
@@ -421,7 +453,8 @@ export default function CalendarWidget({
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
-      response_type: "token",
+      response_type: "code",
+      access_type: "offline",
       scope: "https://www.googleapis.com/auth/calendar",
       prompt: "consent",
     });
@@ -433,10 +466,11 @@ export default function CalendarWidget({
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type === "gcal-token") {
-        const { token, expiresIn } = event.data as { type: string; token: string; expiresIn: string };
+        const { token, refreshToken, expiresIn } = event.data as { type: string; token: string; refreshToken?: string; expiresIn: string };
         const expiry = Date.now() + parseInt(expiresIn) * 1000 - 60000;
         localStorage.setItem("pcal_gcal_token", token);
         localStorage.setItem("pcal_gcal_expiry", String(expiry));
+        if (refreshToken) localStorage.setItem("pcal_gcal_refresh_token", refreshToken);
         setGcalToken(token);
         window.removeEventListener("message", handleMessage);
         popup?.close();
@@ -455,6 +489,7 @@ export default function CalendarWidget({
     localStorage.removeItem("pcal_gcal_token");
     localStorage.removeItem("pcal_gcal_expiry");
     localStorage.removeItem("pcal_gcal_selected");
+    localStorage.removeItem("pcal_gcal_refresh_token");
   };
 
   const toggleCalendar = (calId: string) => {
@@ -1563,12 +1598,22 @@ export default function CalendarWidget({
                     setEventPopup(null);
                     // Optimistic update: group + color
                     setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: opt, color: newColor ?? p.color } : p));
-                    // For relation/rollup props, send the linked page ID; for others, send the display value
-                    const isRelationType = groupPropType === "relation" || groupPropType === "rollup";
-                    const valueToSend = isRelationType ? (groupOptionIds[opt] ?? opt) : opt;
-                    // For rollup, write to the underlying relation property instead
-                    const propToWrite = (groupPropType === "rollup" && groupWriteProp) ? groupWriteProp : config?.notionConfig.groupProperty;
-                    const propTypeToWrite = groupPropType === "rollup" ? "relation" : groupPropType;
+
+                    // Determine what property/type/value to send
+                    const isRollup = groupPropType === "rollup";
+                    const isRelation = groupPropType === "relation";
+                    const propToWrite = (isRollup && groupWriteProp) ? groupWriteProp : config?.notionConfig.groupProperty;
+                    const propTypeToWrite = (isRollup || isRelation) ? "relation" : groupPropType;
+                    const pageIdForRelation = groupOptionIds[opt];
+
+                    // For rollup/relation: we MUST have a pageId; without it, we can't update
+                    if ((isRollup || isRelation) && !pageIdForRelation) {
+                      // No pageId available — silently revert (can't update without a valid page ID)
+                      setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prevGroup, color: prevColor ?? p.color } : p));
+                      return;
+                    }
+
+                    const valueToSend = (isRollup || isRelation) ? pageIdForRelation! : opt;
                     fetch("/api/update-event", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
