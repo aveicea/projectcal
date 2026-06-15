@@ -27,6 +27,7 @@ interface Config {
   gcalCalendarIds?: string[];
   gcalSyncCalId?: string;
   gcalToken?: string;
+  gcalRefreshToken?: string;
   gcalShowTimed?: boolean;
   gcalCalColors?: Record<string, string>;
   gcalBorderColors?: Record<string, string>;
@@ -69,6 +70,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
       gcalCalendarIds: Array.isArray(json.gcalCalIds) ? json.gcalCalIds as string[] : undefined,
       gcalSyncCalId: json.gcalSyncCalId || undefined,
       gcalToken: json.gcalToken || undefined,
+      gcalRefreshToken: json.gcalRefreshToken || undefined,
       gcalShowTimed: json.gcalShowTimed ?? false,
       gcalCalColors: json.gcalCalColors && typeof json.gcalCalColors === "object" ? json.gcalCalColors as Record<string, string> : undefined,
       gcalBorderColors: json.gcalBorderColors && typeof json.gcalBorderColors === "object" ? json.gcalBorderColors as Record<string, string> : undefined,
@@ -127,6 +129,7 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
         initialGcalCalendarIds={config.gcalCalendarIds}
         gcalSyncCalId={config.gcalSyncCalId}
         initialGcalToken={config.gcalToken}
+        initialGcalRefreshToken={config.gcalRefreshToken}
         initialGcalShowTimed={config.gcalShowTimed}
         initialGcalColorOverrides={config.gcalCalColors}
         initialGcalBorderColorOverrides={config.gcalBorderColors}

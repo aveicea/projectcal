@@ -78,6 +78,7 @@ interface CalendarWidgetProps {
   initialGcalCalendarIds?: string[];
   gcalSyncCalId?: string;
   initialGcalToken?: string;
+  initialGcalRefreshToken?: string;
   initialGcalShowTimed?: boolean;
   initialGcalColorOverrides?: Record<string, string>;
   initialGcalBorderColorOverrides?: Record<string, string>;
@@ -100,6 +101,7 @@ export default function CalendarWidget({
   initialGcalCalendarIds,
   gcalSyncCalId,
   initialGcalToken,
+  initialGcalRefreshToken,
   initialGcalShowTimed,
   initialGcalColorOverrides,
   initialGcalBorderColorOverrides,
@@ -199,8 +201,11 @@ export default function CalendarWidget({
       // Access token expired but we have a refresh token — auto-refresh
       refreshGcalToken();
     } else if (initialGcalToken) {
-      // URL-embedded token (no expiry check — if expired, 401 handler will clear it)
+      // URL-embedded token — seed localStorage so refresh can work
       setGcalToken(initialGcalToken);
+      if (initialGcalRefreshToken) {
+        localStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
+      }
     }
     const synced = localStorage.getItem("pcal_synced_ids");
     if (synced) {
