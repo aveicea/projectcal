@@ -956,7 +956,7 @@ function OnboardingPageInner() {
                           const hasOpts = p.type === "select" || p.type === "multi_select";
                           return (
                             <option key={p.name} value={p.name}>
-                              {hasOpts ? "🎨 " : ""}{p.name} ({p.type})
+                              🎨 {p.name} ({p.type})
                             </option>
                           );
                         })}
@@ -969,7 +969,7 @@ function OnboardingPageInner() {
                     )}
                     {settings.groupProperty && !selectOptions[settings.groupProperty] && (
                       <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
-                        🎨 표시 속성 선택 시 팔레트에서 옵션별 색상 지정 가능
+                        선택 후 팔레트에서 값별 색상 지정 가능
                       </div>
                     )}
                   </div>
@@ -1085,9 +1085,9 @@ function OnboardingPageInner() {
                             그룹 속성이 select/multi_select 타입이 아니어서 번호로 표시됩니다.
                           </div>
                         )}
-                        {!settings.groupProperty && Object.keys(selectOptions).length > 0 && (
+                        {!settings.groupProperty && groupableProperties.length > 0 && (
                           <div style={{ fontSize: 11, color: "#aaa", marginBottom: 10 }}>
-                            그룹 속성을 🎨 타입으로 선택하면 옵션별 색상을 지정할 수 있습니다.
+                            그룹 속성을 선택하면 값별 색상을 지정할 수 있습니다.
                           </div>
                         )}
                         <div className="bar-colors-grid">
