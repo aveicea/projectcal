@@ -577,6 +577,38 @@ export default function CalendarWidget({
     }
   };
 
+  const renameGCalEvent = async (seg: AnySegment, newTitle: string, prevTitle: string) => {
+    let token = gcalToken;
+    if (!token || !seg.gcalEventId) return;
+    const expiry = parseInt(localStorage.getItem("pcal_gcal_expiry") ?? "0");
+    if (Date.now() > expiry) token = await refreshGcalToken() ?? token;
+    try {
+      const res = await fetch("/api/gcal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          calendarId: seg.gcalCalendarId || "primary",
+          eventId: seg.gcalEventId,
+          patch: { summary: newTitle },
+        }),
+      });
+      if (res.status === 401) {
+        const refreshed = await refreshGcalToken();
+        if (refreshed) {
+          renameGCalEvent(seg, newTitle, prevTitle);
+        } else {
+          setGcalToken(null); localStorage.removeItem("pcal_gcal_token");
+          setGcalProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: prevTitle } : p));
+        }
+      } else if (!res.ok) {
+        setGcalProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: prevTitle } : p));
+      }
+    } catch {
+      setGcalProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: prevTitle } : p));
+    }
+  };
+
   // ── Notion fetch ──────────────────────────────────────────────────────────
 
   const getPreviewProjects = useCallback((): Project[] => {
@@ -1328,7 +1360,7 @@ export default function CalendarWidget({
                               ...gcalOutlineStyle,
                             }}
                             onDoubleClick={(e) => {
-                              if (!seg.isGCal && seg.isStart) {
+                              if (seg.isStart) {
                                 e.stopPropagation();
                                 setEditingTitle({ id: seg.id, value: seg.title });
                               }
@@ -1426,38 +1458,15 @@ export default function CalendarWidget({
                             )}
 
                             {/* Label / inline title editor */}
-                            {showLabel && editingTitle?.id === seg.id ? (
-                              <input
-                                autoFocus
-                                value={editingTitle.value}
-                                onChange={(e) => setEditingTitle({ id: seg.id, value: e.target.value })}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Escape") { setEditingTitle(null); return; }
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    const newTitle = editingTitle.value.trim();
-                                    setEditingTitle(null);
-                                    if (!newTitle || newTitle === seg.title) return;
-                                    setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: newTitle } : p));
-                                    fetch("/api/update-event", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        apiKey: config?.notionConfig.apiKey,
-                                        pageId: seg.id,
-                                        property: config?.notionConfig.titleProperty,
-                                        value: newTitle,
-                                        propType: "title",
-                                      }),
-                                    }).then((r) => r.json()).then((d) => {
-                                      if (!d.success) setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p));
-                                    }).catch(() => setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p)));
-                                  }
-                                }}
-                                onBlur={() => {
-                                  const newTitle = editingTitle.value.trim();
-                                  setEditingTitle(null);
-                                  if (!newTitle || newTitle === seg.title) return;
+                            {editingTitle?.id === seg.id ? (() => {
+                              const saveTitle = () => {
+                                const newTitle = editingTitle.value.trim();
+                                setEditingTitle(null);
+                                if (!newTitle || newTitle === seg.title) return;
+                                if (seg.isGCal) {
+                                  setGcalProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: newTitle } : p));
+                                  renameGCalEvent(seg, newTitle, seg.title);
+                                } else {
                                   setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: newTitle } : p));
                                   fetch("/api/update-event", {
                                     method: "POST",
@@ -1472,18 +1481,30 @@ export default function CalendarWidget({
                                   }).then((r) => r.json()).then((d) => {
                                     if (!d.success) setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p));
                                   }).catch(() => setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: seg.title } : p)));
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                style={{
-                                  position: "absolute", left: 2,
-                                  height: "100%", boxSizing: "border-box", padding: "0 6px",
-                                  width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
-                                  background: "rgba(0,0,0,0.35)", border: "none", outline: "none",
-                                  color: labelColor, fontSize: 9, fontWeight: "bold",
-                                  borderRadius: 2, zIndex: 300,
-                                }}
-                              />
-                            ) : showLabel && (
+                                }
+                              };
+                              return (
+                                <input
+                                  autoFocus
+                                  value={editingTitle.value}
+                                  onChange={(e) => setEditingTitle({ id: seg.id, value: e.target.value })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") { setEditingTitle(null); return; }
+                                    if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
+                                  }}
+                                  onBlur={saveTitle}
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{
+                                    position: "absolute", left: 2,
+                                    height: "100%", boxSizing: "border-box", padding: "0 6px",
+                                    width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 60)}px`,
+                                    background: "rgba(0,0,0,0.4)", border: "none", outline: "none",
+                                    color: "#fff", fontSize: 9, fontWeight: "bold",
+                                    borderRadius: 2, zIndex: 300,
+                                  }}
+                                />
+                              );
+                            })() : showLabel && (
                               <span style={{
                                 position: "absolute", left: 2, display: "flex",
                                 justifyContent: "flex-start", alignItems: "center",
