@@ -127,6 +127,8 @@ export default function CalendarWidget({
   const [dateOverrides, setDateOverrides] = useState<Map<string, { startDate: string; endDate: string }>>(new Map());
   const [dropDateStr, setDropDateStr] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, text: "", color: "" });
+  const [createInput, setCreateInput] = useState<{ dateStr: string; title: string } | null>(null);
+  const [creating, setCreating] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   const dragGrabDate = useRef<string | null>(null);
@@ -1080,6 +1082,11 @@ export default function CalendarWidget({
                         transition: "background 0.1s",
                         borderRadius: 4,
                       }}
+                      onDoubleClick={(e) => {
+                        if ((e.target as HTMLElement) === e.currentTarget) {
+                          setCreateInput({ dateStr, title: "" });
+                        }
+                      }}
                       onDragOver={(e) => {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
@@ -1211,6 +1218,7 @@ export default function CalendarWidget({
                               ...(isDragging ? { opacity: 0.3 } : isUpdating ? { opacity: 0.6 } : { opacity: segOpacity }),
                               ...gcalOutlineStyle,
                             }}
+                            onDoubleClick={(e) => e.stopPropagation()}
                             draggable={!isUpdating}
                             onDragStart={(e) => {
                               dragMode.current = "move";
@@ -1375,6 +1383,56 @@ export default function CalendarWidget({
           border: `1px solid ${tooltip.color ? hexToRgba(tooltip.color, 0.4) : "#eee"}`,
         }}>
           {tooltip.text}
+        </div>
+      )}
+
+      {createInput && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.15)",
+        }} onClick={() => setCreateInput(null)}>
+          <div style={{
+            background: "#fff", borderRadius: 12, padding: "18px 20px", boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
+            minWidth: 260, display: "flex", flexDirection: "column", gap: 10,
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: primaryColor }}>{createInput.dateStr} 일정 추가</div>
+            <input
+              autoFocus
+              placeholder="일정 제목 입력..."
+              value={createInput.title}
+              onChange={(e) => setCreateInput((prev) => prev ? { ...prev, title: e.target.value } : null)}
+              onKeyDown={async (e) => {
+                if (e.key === "Escape") { setCreateInput(null); return; }
+                if (e.key === "Enter" && createInput.title.trim()) {
+                  setCreating(true);
+                  try {
+                    await fetch("/api/create-event", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        apiKey: config?.notionConfig.apiKey,
+                        databaseId: config?.notionConfig.databaseId,
+                        titleProperty: config?.notionConfig.titleProperty,
+                        dateProperty: config?.notionConfig.dateProperty,
+                        title: createInput.title.trim(),
+                        startDate: createInput.dateStr,
+                        endDate: createInput.dateStr,
+                      }),
+                    });
+                    setCreateInput(null);
+                    fetchProjects();
+                  } catch { /* ignore */ } finally {
+                    setCreating(false);
+                  }
+                }
+              }}
+              style={{
+                border: `1.5px solid ${primaryColor}`, borderRadius: 7, padding: "7px 10px",
+                fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box",
+              }}
+            />
+            <div style={{ fontSize: 10, color: "#aaa" }}>Enter로 저장, Esc로 취소{creating ? " · 저장 중..." : ""}</div>
+          </div>
         </div>
       )}
     </>
