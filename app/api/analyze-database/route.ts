@@ -52,50 +52,79 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Mapping from display title → Notion page ID for relation properties
+    const relationOptionIds: Record<string, Record<string, string>> = {};
+
     // If a groupProperty is provided and not already in selectOptions, fetch unique values from pages
     if (groupProperty && !selectOptions[groupProperty] && props[groupProperty]) {
       try {
-        const pages = await notion.databases.query({ database_id: databaseId, page_size: 100 });
-        const valSet = new Set<string>();
         const propType = props[groupProperty].type;
-        for (const page of pages.results) {
-          const pageProps = (page as { properties: Record<string, unknown> }).properties;
-          const p = pageProps[groupProperty] as Record<string, unknown> | undefined;
-          if (!p) continue;
-          let val = "";
-          if (propType === "rich_text") {
-            const rt = p.rich_text as { plain_text?: string }[] | undefined;
-            val = rt?.[0]?.plain_text ?? "";
-          } else if (propType === "title") {
-            const t = p.title as { plain_text?: string }[] | undefined;
-            val = t?.[0]?.plain_text ?? "";
-          } else if (propType === "formula") {
-            const f = p.formula as { type?: string; string?: string; number?: number } | undefined;
-            val = String(f?.string ?? f?.number ?? "");
-          } else if (propType === "rollup") {
-            type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
-            const r = p.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
-            if (r?.type === "number" && r.number != null) {
-              val = String(r.number);
-            } else if (r?.type === "array") {
-              for (const item of r.array ?? []) {
-                let itemVal = "";
-                if (item.type === "select") itemVal = item.select?.name ?? "";
-                else if (item.type === "multi_select") itemVal = item.multi_select?.map((s) => s.name).filter(Boolean).join(", ") ?? "";
-                else if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
-                else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
-                else if (item.type === "number" && item.number != null) itemVal = String(item.number);
-                if (itemVal.trim()) { val = itemVal.trim(); break; }
+
+        if (propType === "relation") {
+          // For relation props, query the linked database to get target page titles
+          const relProp = props[groupProperty] as Record<string, unknown>;
+          const linkedDbId = (relProp.relation as { database_id?: string })?.database_id;
+          if (linkedDbId) {
+            const linked = await notion.databases.query({ database_id: linkedDbId, page_size: 100 });
+            const titleMap: Record<string, string> = {};
+            for (const page of linked.results) {
+              if (!("properties" in page)) continue;
+              const pp = (page as { id: string; properties: Record<string, unknown> });
+              for (const pv of Object.values(pp.properties)) {
+                const pvc = pv as { type?: string; title?: { plain_text?: string }[] };
+                if (pvc.type === "title" && pvc.title) {
+                  const name = pvc.title.map((t) => t.plain_text ?? "").join("").trim();
+                  if (name) { titleMap[name] = pp.id; break; }
+                }
               }
             }
+            if (Object.keys(titleMap).length > 0) {
+              selectOptions[groupProperty] = Object.keys(titleMap);
+              relationOptionIds[groupProperty] = titleMap;
+            }
           }
-          if (val.trim()) valSet.add(val.trim());
+        } else {
+          const pages = await notion.databases.query({ database_id: databaseId, page_size: 100 });
+          const valSet = new Set<string>();
+          for (const page of pages.results) {
+            const pageProps = (page as { properties: Record<string, unknown> }).properties;
+            const p = pageProps[groupProperty] as Record<string, unknown> | undefined;
+            if (!p) continue;
+            let val = "";
+            if (propType === "rich_text") {
+              const rt = p.rich_text as { plain_text?: string }[] | undefined;
+              val = rt?.[0]?.plain_text ?? "";
+            } else if (propType === "title") {
+              const t = p.title as { plain_text?: string }[] | undefined;
+              val = t?.[0]?.plain_text ?? "";
+            } else if (propType === "formula") {
+              const f = p.formula as { type?: string; string?: string; number?: number } | undefined;
+              val = String(f?.string ?? f?.number ?? "");
+            } else if (propType === "rollup") {
+              type RollupItem = { type?: string; title?: { plain_text?: string }[]; rich_text?: { plain_text?: string }[]; select?: { name?: string }; multi_select?: { name?: string }[]; number?: number };
+              const r = p.rollup as { type?: string; number?: number; array?: RollupItem[] } | undefined;
+              if (r?.type === "number" && r.number != null) {
+                val = String(r.number);
+              } else if (r?.type === "array") {
+                for (const item of r.array ?? []) {
+                  let itemVal = "";
+                  if (item.type === "select") itemVal = item.select?.name ?? "";
+                  else if (item.type === "multi_select") itemVal = item.multi_select?.map((s) => s.name).filter(Boolean).join(", ") ?? "";
+                  else if (item.type === "title") itemVal = item.title?.[0]?.plain_text ?? "";
+                  else if (item.type === "rich_text") itemVal = item.rich_text?.[0]?.plain_text ?? "";
+                  else if (item.type === "number" && item.number != null) itemVal = String(item.number);
+                  if (itemVal.trim()) { val = itemVal.trim(); break; }
+                }
+              }
+            }
+            if (val.trim()) valSet.add(val.trim());
+          }
+          if (valSet.size > 0) selectOptions[groupProperty] = [...valSet];
         }
-        if (valSet.size > 0) selectOptions[groupProperty] = [...valSet];
       } catch { /* silent — don't fail the whole request */ }
     }
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, selectOptions } });
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, selectOptions, relationOptionIds } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });
