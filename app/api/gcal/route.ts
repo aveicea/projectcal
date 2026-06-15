@@ -17,6 +17,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data, { status: res.status });
   }
 
+  // Delete an event
+  if (action === "delete") {
+    const calendarId = searchParams.get("calendarId") || "primary";
+    const eventId = searchParams.get("eventId");
+    if (!eventId) return NextResponse.json({ error: "eventId required" }, { status: 400 });
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+    );
+    return NextResponse.json({ success: res.ok }, { status: res.ok ? 200 : res.status });
+  }
+
   // Fetch events for a specific calendar
   const calendarId = searchParams.get("calendarId") || "primary";
   const timeMin = searchParams.get("timeMin");

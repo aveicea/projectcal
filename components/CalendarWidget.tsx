@@ -129,6 +129,7 @@ export default function CalendarWidget({
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, text: "", color: "" });
   const [createInput, setCreateInput] = useState<{ dateStr: string; title: string; row: number } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [dropOnHeader, setDropOnHeader] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   const dragGrabDate = useRef<string | null>(null);
@@ -1040,8 +1041,40 @@ export default function CalendarWidget({
                     display: "flex", flexDirection: "column", alignItems: "center",
                     width: dayWidth, flexShrink: 0,
                   }}>
-                    {/* Date header */}
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55 }}>
+                    {/* Date header — drop here to delete */}
+                    <div
+                      style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s" }}
+                      onDragOver={(e) => { if (dragId) { e.preventDefault(); setDropOnHeader(true); } }}
+                      onDragLeave={() => setDropOnHeader(false)}
+                      onDrop={async (e) => {
+                        e.preventDefault();
+                        setDropOnHeader(false);
+                        const sourceId = e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain") || dragId || "";
+                        if (!sourceId) return;
+                        const proj = allDisplayProjects.find((p) => p.id === sourceId);
+                        if (!proj) return;
+                        setDragId(null);
+                        if (proj.isGCal) {
+                          // GCal delete
+                          if (gcalToken && proj.gcalEventId) {
+                            try {
+                              await fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(proj.gcalEventId)}&calendarId=${encodeURIComponent(proj.gcalCalendarId || "primary")}`);
+                              fetchProjects();
+                            } catch { /* ignore */ }
+                          }
+                        } else {
+                          // Notion archive
+                          try {
+                            await fetch("/api/delete-event", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ apiKey: config?.notionConfig.apiKey, pageId: sourceId }),
+                            });
+                            fetchProjects();
+                          } catch { /* ignore */ }
+                        }
+                      }}
+                    >
                       {isMonthBoundary ? (
                         <span style={{
                           fontSize: 7, fontWeight: 700, color: primaryColor, letterSpacing: 0.5,
