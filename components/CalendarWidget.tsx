@@ -585,7 +585,9 @@ export default function CalendarWidget({
       if (Object.keys(groupColorOverrides).length === 0) return segs;
       return segs.map((p) => ({
         ...p,
-        color: (p.group && groupColorOverrides[p.group]) || p.color,
+        color: (p.group && groupColorOverrides[p.group])
+          || (!p.group?.trim() && groupColorOverrides["__none__"])
+          || p.color,
       }));
     };
 

@@ -1092,24 +1092,35 @@ function OnboardingPageInner() {
                         )}
                         <div className="bar-colors-grid">
                           {hasGroupOpts ? (
-                            groupOpts.map((optName, i) => {
-                              const fallback = DEFAULT_BAR_COLORS[i % DEFAULT_BAR_COLORS.length];
-                              const color = groupColorOverrides[optName] || settings.barColors[i] || fallback;
-                              return (
-                                <div key={optName} className="bar-color-item">
-                                  <input type="color" className="bar-color-input" value={color}
-                                    onChange={(e) => {
-                                      const next = [...settings.barColors];
-                                      while (next.length <= i) next.push(DEFAULT_BAR_COLORS[next.length % DEFAULT_BAR_COLORS.length]);
-                                      next[i] = e.target.value;
-                                      update("barColors", next);
-                                      setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
-                                      setSelectedTheme("");
-                                    }} />
-                                  <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
-                                </div>
-                              );
-                            })
+                            <>
+                              {groupOpts.map((optName, i) => {
+                                const fallback = DEFAULT_BAR_COLORS[i % DEFAULT_BAR_COLORS.length];
+                                const color = groupColorOverrides[optName] || settings.barColors[i] || fallback;
+                                return (
+                                  <div key={optName} className="bar-color-item">
+                                    <input type="color" className="bar-color-input" value={color}
+                                      onChange={(e) => {
+                                        const next = [...settings.barColors];
+                                        while (next.length <= i) next.push(DEFAULT_BAR_COLORS[next.length % DEFAULT_BAR_COLORS.length]);
+                                        next[i] = e.target.value;
+                                        update("barColors", next);
+                                        setGroupColorOverrides((prev) => ({ ...prev, [optName]: e.target.value }));
+                                        setSelectedTheme("");
+                                      }} />
+                                    <span style={{ fontSize: 10, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={optName}>{optName}</span>
+                                  </div>
+                                );
+                              })}
+                              <div className="bar-color-item" style={{ opacity: 0.6 }}>
+                                <input type="color" className="bar-color-input"
+                                  value={groupColorOverrides["__none__"] || DEFAULT_BAR_COLORS[groupOpts.length % DEFAULT_BAR_COLORS.length]}
+                                  onChange={(e) => {
+                                    setGroupColorOverrides((prev) => ({ ...prev, ["__none__"]: e.target.value }));
+                                    setSelectedTheme("");
+                                  }} />
+                                <span style={{ fontSize: 10, color: "#aaa", fontStyle: "italic" }}>(없음)</span>
+                              </div>
+                            </>
                           ) : (
                             settings.barColors.map((color, i) => (
                               <div key={i} className="bar-color-item">
