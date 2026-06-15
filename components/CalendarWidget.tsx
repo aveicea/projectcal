@@ -53,6 +53,7 @@ interface CalendarConfig {
     databaseId: string;
     dateProperty: string;
     titleProperty: string;
+    groupProperty?: string;
   };
   theme: CalendarTheme;
 }
@@ -130,6 +131,9 @@ export default function CalendarWidget({
   const [createInput, setCreateInput] = useState<{ dateStr: string; title: string; row: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const [dropOnHeader, setDropOnHeader] = useState(false);
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  const [groupPropType, setGroupPropType] = useState<string>("select");
+  const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   const dragGrabDate = useRef<string | null>(null);
@@ -550,6 +554,27 @@ export default function CalendarWidget({
       { id: "s5", title: "Design Polish",    startDate: d(0, 21),  endDate: d(0, 24), pageUrl: "#" },
     ];
   }, [year, month]);
+
+  // Fetch group property options once for the inline picker
+  useEffect(() => {
+    const gp = config?.notionConfig.groupProperty;
+    if (!gp || !config?.notionConfig.apiKey || !config?.notionConfig.databaseId) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: config.notionConfig.apiKey, databaseId: config.notionConfig.databaseId, groupProperty: gp }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && d.data?.selectOptions?.[gp]) {
+          setGroupOptions(d.data.selectOptions[gp]);
+        }
+        const gpMeta = d.data?.groupableProperties?.find((p: { name: string; type: string }) => p.name === gp);
+        if (gpMeta) setGroupPropType(gpMeta.type);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.notionConfig.groupProperty]);
 
   const fetchProjects = useCallback(async () => {
     if (centerYear === null || centerMonth === null) return;
@@ -1255,6 +1280,12 @@ export default function CalendarWidget({
                               ...gcalOutlineStyle,
                             }}
                             onDoubleClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              if (!seg.isGCal && config?.notionConfig.groupProperty && groupOptions.length > 0 && seg.isStart) {
+                                e.stopPropagation();
+                                setEventPopup({ id: seg.id, group: seg.group ?? "", x: e.clientX, y: e.clientY });
+                              }
+                            }}
                             draggable={!isUpdating}
                             onDragStart={(e) => {
                               dragMode.current = "move";
@@ -1479,6 +1510,62 @@ export default function CalendarWidget({
           border: `1px solid ${tooltip.color ? hexToRgba(tooltip.color, 0.4) : "#eee"}`,
         }}>
           {tooltip.text}
+        </div>
+      )}
+
+      {eventPopup && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
+          <div
+            style={{
+              position: "fixed", left: eventPopup.x, top: eventPopup.y + 6,
+              background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+              border: "1px solid #eee", padding: "6px 0", minWidth: 150, zIndex: 10001,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 10, color: "#aaa", padding: "2px 12px 6px", fontWeight: 600 }}>
+              {config?.notionConfig.groupProperty}
+            </div>
+            {groupOptions.map((opt) => {
+              const isCurrent = eventPopup.group === opt;
+              return (
+                <div
+                  key={opt}
+                  style={{
+                    padding: "5px 12px", fontSize: 11, cursor: "pointer",
+                    fontWeight: isCurrent ? 700 : 400,
+                    color: isCurrent ? primaryColor : "#444",
+                    background: isCurrent ? hexToRgba(primaryColor, 0.08) : "transparent",
+                  }}
+                  onMouseEnter={(e) => { if (!isCurrent) (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = isCurrent ? hexToRgba(primaryColor, 0.08) : "transparent"; }}
+                  onClick={() => {
+                    const pid = eventPopup.id;
+                    const prev = eventPopup.group;
+                    setEventPopup(null);
+                    // Optimistic update
+                    setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: opt } : p));
+                    fetch("/api/update-event", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        apiKey: config?.notionConfig.apiKey,
+                        pageId: pid,
+                        property: config?.notionConfig.groupProperty,
+                        value: opt,
+                        propType: groupPropType,
+                      }),
+                    })
+                      .then((r) => r.json())
+                      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prev } : p)); })
+                      .catch(() => setProjects((ps) => ps.map((p) => p.id === pid ? { ...p, group: prev } : p)));
+                  }}
+                >
+                  {opt}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
