@@ -1055,23 +1055,24 @@ export default function CalendarWidget({
                         if (!proj) return;
                         setDragId(null);
                         if (proj.isGCal) {
-                          // GCal delete
                           if (gcalToken && proj.gcalEventId) {
-                            try {
-                              await fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(proj.gcalEventId)}&calendarId=${encodeURIComponent(proj.gcalCalendarId || "primary")}`);
-                              fetchProjects();
-                            } catch { /* ignore */ }
+                            // Optimistic remove
+                            setGcalProjects((prev) => prev.filter((p) => p.id !== sourceId));
+                            fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(proj.gcalEventId)}&calendarId=${encodeURIComponent(proj.gcalCalendarId || "primary")}`)
+                              .then((r) => { if (!r.ok) setGcalProjects((prev) => [...prev, proj as AnySegment]); })
+                              .catch(() => setGcalProjects((prev) => [...prev, proj as AnySegment]));
                           }
                         } else {
-                          // Notion archive
-                          try {
-                            await fetch("/api/delete-event", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ apiKey: config?.notionConfig.apiKey, pageId: sourceId }),
-                            });
-                            fetchProjects();
-                          } catch { /* ignore */ }
+                          // Optimistic remove
+                          setProjects((prev) => prev.filter((p) => p.id !== sourceId));
+                          fetch("/api/delete-event", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ apiKey: config?.notionConfig.apiKey, pageId: sourceId }),
+                          })
+                            .then((r) => r.json())
+                            .then((d) => { if (!d.success) setProjects((prev) => [...prev, proj as ProjectSegment]); })
+                            .catch(() => setProjects((prev) => [...prev, proj as ProjectSegment]));
                         }
                       }}
                     >
@@ -1406,29 +1407,39 @@ export default function CalendarWidget({
                             value={createInput.title}
                             onChange={(e) => setCreateInput((p) => p ? { ...p, title: e.target.value } : null)}
                             onBlur={() => setCreateInput(null)}
-                            onKeyDown={async (e) => {
+                            onKeyDown={(e) => {
                               if (e.key === "Escape") { setCreateInput(null); return; }
                               if (e.key === "Enter" && createInput.title.trim()) {
                                 e.preventDefault();
                                 const t = createInput.title.trim();
+                                const tmpId = `__tmp__${Date.now()}`;
+                                const tmpProject: ProjectSegment = {
+                                  id: tmpId, title: t, startDate: dateStr, endDate: dateStr,
+                                  color: (barColors[projects.length % barColors.length]) || "#FFB3BA",
+                                  pageUrl: "#", isStart: true, isEnd: true, duration: 1, rowIndex: 0,
+                                };
                                 setCreateInput(null);
-                                setCreating(true);
-                                try {
-                                  await fetch("/api/create-event", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      apiKey: config?.notionConfig.apiKey,
-                                      databaseId: config?.notionConfig.databaseId,
-                                      titleProperty: config?.notionConfig.titleProperty,
-                                      dateProperty: config?.notionConfig.dateProperty,
-                                      title: t,
-                                      startDate: dateStr,
-                                      endDate: dateStr,
-                                    }),
-                                  });
-                                  fetchProjects();
-                                } catch { /* ignore */ } finally { setCreating(false); }
+                                setProjects((prev) => [...prev, tmpProject]);
+                                fetch("/api/create-event", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    apiKey: config?.notionConfig.apiKey,
+                                    databaseId: config?.notionConfig.databaseId,
+                                    titleProperty: config?.notionConfig.titleProperty,
+                                    dateProperty: config?.notionConfig.dateProperty,
+                                    title: t, startDate: dateStr, endDate: dateStr,
+                                  }),
+                                })
+                                  .then((r) => r.json())
+                                  .then((d) => {
+                                    if (d.success && d.id) {
+                                      setProjects((prev) => prev.map((p) => p.id === tmpId ? { ...p, id: d.id, pageUrl: `https://notion.so/${d.id.replace(/-/g, "")}` } : p));
+                                    } else {
+                                      setProjects((prev) => prev.filter((p) => p.id !== tmpId));
+                                    }
+                                  })
+                                  .catch(() => setProjects((prev) => prev.filter((p) => p.id !== tmpId)));
                               }
                             }}
                             style={{
