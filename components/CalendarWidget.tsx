@@ -650,6 +650,37 @@ export default function CalendarWidget({
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
   const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
 
+  function bumpRows(movedId: string, newRow: number, prevOverrides: Map<string, number>): Map<string, number> {
+    const uniqueById = new Map<string, AnySegment>();
+    for (const p of allDisplayProjects) { if (!uniqueById.has(p.id)) uniqueById.set(p.id, p); }
+    const effective = new Map(rowMap);
+    prevOverrides.forEach((r, id) => { if (effective.has(id)) effective.set(id, r); });
+    effective.set(movedId, newRow);
+    const next = new Map(prevOverrides);
+    next.set(movedId, newRow);
+    const overlap = (a: AnySegment, b: AnySegment) => a.startDate <= b.endDate && a.endDate >= b.startDate;
+    let changed = true;
+    let guard = 0;
+    while (changed && guard++ < 200) {
+      changed = false;
+      const ids = Array.from(uniqueById.keys());
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const pA = uniqueById.get(ids[i])!;
+          const pB = uniqueById.get(ids[j])!;
+          if ((effective.get(ids[i]) ?? 0) === (effective.get(ids[j]) ?? 0) && overlap(pA, pB)) {
+            const pushId = ids[i] === movedId ? ids[j] : ids[i];
+            const pushed = (effective.get(pushId) ?? 0) + 1;
+            effective.set(pushId, pushed);
+            next.set(pushId, pushed);
+            changed = true;
+          }
+        }
+      }
+    }
+    return next;
+  }
+
   function getSegmentsForDay(dateStr: string): AnySegment[] {
     return allDisplayProjects
       .filter((p) => dateStr >= p.startDate && dateStr <= p.endDate)
@@ -1066,15 +1097,22 @@ export default function CalendarWidget({
                         if (project?.isGCal) {
                           // GCal event drag → update in Google Calendar
                           if (mode === "move" && dragGrabDate.current) {
+                            const zoneRect = e.currentTarget.getBoundingClientRect();
+                            const dropRow = Math.max(0, Math.floor((e.clientY - zoneRect.top) / ROW_HEIGHT));
                             const delta = daysBetween(dragGrabDate.current, dateStr);
                             if (delta !== 0) {
                               const newStart = addDays(project.startDate, delta);
                               const newEnd = addDays(project.endDate, delta);
-                              // Optimistic local update
                               setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: newEnd }); return next; });
-                              setRowOverrides((prev) => { const next = new Map(prev); next.delete(sourceId); return next; });
                               updateGCalEvent(project, newStart, newEnd);
                             }
+                            setRowOverrides((prev) => {
+                              const next = bumpRows(sourceId, dropRow, prev);
+                              const obj: Record<string, number> = {};
+                              next.forEach((v, k) => { obj[k] = v; });
+                              localStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
+                              return next;
+                            });
                           } else if (mode === "resize-end") {
                             const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
                             setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
@@ -1094,10 +1132,8 @@ export default function CalendarWidget({
                             if (delta !== 0) {
                               setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: addDays(project.startDate, delta), endDate: addDays(project.endDate, delta) }); return next; });
                             }
-                            // Always update row override (even if date didn't change)
                             setRowOverrides((prev) => {
-                              const next = new Map(prev);
-                              next.set(sourceId, dropRow);
+                              const next = bumpRows(sourceId, dropRow, prev);
                               const obj: Record<string, number> = {};
                               next.forEach((v, k) => { obj[k] = v; });
                               localStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
