@@ -221,15 +221,18 @@ export default function CalendarWidget({
     const hasRefreshToken = !!localStorage.getItem("pcal_gcal_refresh_token");
 
     if (storedToken && Date.now() < storedExpiry - 60000) {
+      // Valid cached token — use it and arm refresh timer
       setGcalToken(storedToken);
       if (gcalRefreshTimer.current) clearTimeout(gcalRefreshTimer.current);
       const refreshIn = storedExpiry - Date.now() - 5 * 60 * 1000;
       if (refreshIn > 0) gcalRefreshTimer.current = setTimeout(() => refreshGcalToken(), refreshIn);
-    } else if (hasRefreshToken) {
-      refreshGcalToken();
     } else if (initialGcalToken) {
+      // Fresh link with embedded access token — use immediately, auto-refresh via refresh token
       const expiry = Date.now() + 3540 * 1000;
       saveGcalToken(initialGcalToken, expiry);
+    } else if (hasRefreshToken) {
+      // No access token but have refresh token — get fresh one
+      refreshGcalToken();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

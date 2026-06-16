@@ -483,7 +483,8 @@ function OnboardingPageInner() {
         darkMode: settings.darkMode,
         weekView: settings.weekView,
       };
-      if (gcalRefreshToken || gcalToken) {
+      if (gcalToken || gcalRefreshToken) {
+        if (gcalToken) cfg.gcalToken = gcalToken;
         if (gcalRefreshToken) cfg.gcalRefreshToken = gcalRefreshToken;
         if (gcalSelectedIds.size > 0) cfg.gcalCalIds = [...gcalSelectedIds];
         if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
