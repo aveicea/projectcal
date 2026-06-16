@@ -202,7 +202,10 @@ export default function CalendarWidget({
       // Access token expired but we have a refresh token — auto-refresh
       refreshGcalToken();
     } else if (initialGcalToken) {
-      // URL-embedded token — seed localStorage so refresh can work
+      // URL-embedded token — store in localStorage so it survives page reload
+      const expiry = Date.now() + 3540 * 1000; // assume ~1hr from now
+      localStorage.setItem("pcal_gcal_token", initialGcalToken);
+      localStorage.setItem("pcal_gcal_expiry", String(expiry));
       setGcalToken(initialGcalToken);
       if (initialGcalRefreshToken) {
         localStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
