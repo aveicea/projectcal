@@ -1662,17 +1662,19 @@ export default function CalendarWidget({
       )}
 
       {eventPopup && (() => {
-        const popupW = 160, popupH = Math.min(220, groupOptions.length * 29 + 12);
-        const safeLeft = typeof window !== "undefined" ? Math.min(eventPopup.x, window.innerWidth - popupW - 8) : eventPopup.x;
-        const safeTop = typeof window !== "undefined" ? Math.min(eventPopup.y + 6, window.innerHeight - popupH - 8) : eventPopup.y + 6;
+        const popupW = 150, maxH = 160;
+        const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+        const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+        const safeLeft = Math.min(Math.max(eventPopup.x, 8), vw - popupW - 8);
+        const safeTop = Math.min(Math.max(eventPopup.y + 6, 8), vh - maxH - 8);
         return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
             style={{
               position: "fixed", left: safeLeft, top: safeTop,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-              border: "1px solid #eee", padding: "6px 0", minWidth: popupW,
-              maxHeight: 220, overflowY: "auto", zIndex: 10001,
+              border: "1px solid #eee", padding: "4px 0", minWidth: popupW,
+              maxHeight: maxH, overflowY: "auto", zIndex: 10001,
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1682,7 +1684,7 @@ export default function CalendarWidget({
                 <div
                   key={opt}
                   style={{
-                    padding: "5px 12px", fontSize: 11, cursor: "pointer",
+                    padding: "4px 10px", fontSize: 11, cursor: "pointer",
                     fontWeight: isCurrent ? 700 : 400,
                     color: isCurrent ? primaryColor : "#444",
                     background: isCurrent ? hexToRgba(primaryColor, 0.08) : "transparent",
