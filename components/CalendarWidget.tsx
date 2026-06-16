@@ -733,6 +733,14 @@ export default function CalendarWidget({
     });
   };
 
+  const scrollToToday = () => {
+    if (!bodyRef.current) return;
+    const offset = weekView
+      ? prevWeekDays.length * WEEK_DAY_WIDTH + 12
+      : prevDays.length * DAY_WIDTH + 12;
+    bodyRef.current.scrollLeft = offset;
+  };
+
   const formatShortDate = (dateStr: string) => {
     const d = new Date(dateStr + "T00:00:00");
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -1156,7 +1164,8 @@ export default function CalendarWidget({
                   }}>
                     {/* Date header — drop here to delete */}
                     <div
-                      style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s" }}
+                      style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
+                      onClick={scrollToToday}
                       onDragOver={(e) => { if (dragId) { e.preventDefault(); setDropOnHeader(true); } }}
                       onDragLeave={() => setDropOnHeader(false)}
                       onDrop={async (e) => {
