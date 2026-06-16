@@ -169,48 +169,73 @@ export default function CalendarWidget({
   const [gcalCalendarOrder, setGcalCalendarOrder] = useState<string[]>([]);
   const panelDragCalId = useRef<string | null>(null);
 
-  // Refresh GCal access token using stored refresh token
-  const refreshGcalToken = async (): Promise<string | null> => {
-    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
-    if (!refreshToken) return null;
-    try {
-      const res = await fetch("/api/gcal-refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const data = await res.json();
-      if (data.access_token) {
-        const expiry = Date.now() + (data.expires_in ?? 3600) * 1000 - 60000;
-        localStorage.setItem("pcal_gcal_token", data.access_token);
-        localStorage.setItem("pcal_gcal_expiry", String(expiry));
-        setGcalToken(data.access_token);
-        return data.access_token;
-      }
-    } catch { /* silent */ }
-    return null;
+  const gcalRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gcalRefreshInFlight = useRef<Promise<string | null> | null>(null);
+
+  const saveGcalToken = (token: string, expiry: number) => {
+    localStorage.setItem("pcal_gcal_token", token);
+    localStorage.setItem("pcal_gcal_expiry", String(expiry));
+    setGcalToken(token);
+    if (gcalRefreshTimer.current) clearTimeout(gcalRefreshTimer.current);
+    const refreshIn = expiry - Date.now() - 5 * 60 * 1000;
+    if (refreshIn > 0) {
+      gcalRefreshTimer.current = setTimeout(() => refreshGcalToken(), refreshIn);
+    }
   };
 
-  // Load token + synced IDs from localStorage (or from URL-embedded token)
+  const refreshGcalToken = (): Promise<string | null> => {
+    if (gcalRefreshInFlight.current) return gcalRefreshInFlight.current;
+    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
+    if (!refreshToken) return Promise.resolve(null);
+    gcalRefreshInFlight.current = (async () => {
+      try {
+        const res = await fetch("/api/gcal-refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        const data = await res.json();
+        if (data.access_token) {
+          const expiry = Date.now() + (data.expires_in ?? 3600) * 1000;
+          saveGcalToken(data.access_token, expiry);
+          return data.access_token as string;
+        }
+      } catch { /* silent */ } finally {
+        gcalRefreshInFlight.current = null;
+      }
+      return null;
+    })();
+    return gcalRefreshInFlight.current;
+  };
+
+  // On mount: seed refresh token from embedded URL, then restore access token or auto-refresh
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = localStorage.getItem("pcal_gcal_token");
-    const expiry = localStorage.getItem("pcal_gcal_expiry");
-    if (token && expiry && Date.now() < parseInt(expiry)) {
-      setGcalToken(token);
-    } else if (localStorage.getItem("pcal_gcal_refresh_token")) {
-      // Access token expired but we have a refresh token — auto-refresh
+
+    if (initialGcalRefreshToken) {
+      localStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
+    }
+
+    const storedToken = localStorage.getItem("pcal_gcal_token");
+    const storedExpiry = parseInt(localStorage.getItem("pcal_gcal_expiry") ?? "0");
+    const hasRefreshToken = !!localStorage.getItem("pcal_gcal_refresh_token");
+
+    if (storedToken && Date.now() < storedExpiry - 60000) {
+      setGcalToken(storedToken);
+      if (gcalRefreshTimer.current) clearTimeout(gcalRefreshTimer.current);
+      const refreshIn = storedExpiry - Date.now() - 5 * 60 * 1000;
+      if (refreshIn > 0) gcalRefreshTimer.current = setTimeout(() => refreshGcalToken(), refreshIn);
+    } else if (hasRefreshToken) {
       refreshGcalToken();
     } else if (initialGcalToken) {
-      // URL-embedded token — store in localStorage so it survives page reload
-      const expiry = Date.now() + 3540 * 1000; // assume ~1hr from now
-      localStorage.setItem("pcal_gcal_token", initialGcalToken);
-      localStorage.setItem("pcal_gcal_expiry", String(expiry));
-      setGcalToken(initialGcalToken);
-      if (initialGcalRefreshToken) {
-        localStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
-      }
+      const expiry = Date.now() + 3540 * 1000;
+      saveGcalToken(initialGcalToken, expiry);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const synced = localStorage.getItem("pcal_synced_ids");
     if (synced) {
       try { setSyncedIds(new Set(JSON.parse(synced))); } catch { /* ignore */ }
@@ -252,7 +277,8 @@ export default function CalendarWidget({
         setRowOverrides(new Map(Object.entries(obj).map(([k, v]) => [k, v])));
       } catch { /* ignore */ }
     }
-  }, [initialGcalToken, initialGcalColorOverrides, initialGroupColors, initialGcalShowTimed]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch calendar list when token changes
   useEffect(() => {
