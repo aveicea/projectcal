@@ -123,6 +123,7 @@ export default function CalendarWidget({
 
   const [projects, setProjects] = useState<ProjectSegment[]>([]);
   const [loading, setLoading] = useState(true);
+  const hasLoadedOnce = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -660,7 +661,7 @@ export default function CalendarWidget({
 
   const fetchProjects = useCallback(async () => {
     if (centerYear === null || centerMonth === null) return;
-    setLoading(true);
+    if (!hasLoadedOnce.current) setLoading(true);
     setError(null);
 
     const applyGroupColors = (segs: ReturnType<typeof assignColors>) => {
@@ -706,11 +707,13 @@ export default function CalendarWidget({
         setProjects([]);
       } finally {
         setLoading(false);
+        hasLoadedOnce.current = true;
       }
       return;
     }
 
     setLoading(false);
+    hasLoadedOnce.current = true;
   }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects, groupColorOverrides]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
@@ -728,16 +731,6 @@ export default function CalendarWidget({
       d.setDate(d.getDate() + delta * 7);
       return formatDate(d);
     });
-  };
-
-  const navigate = (delta: number) => weekView ? navigateWeek(delta) : navigateMonth(delta);
-
-  const scrollToToday = () => {
-    if (!bodyRef.current) return;
-    const offset = weekView
-      ? prevWeekDays.length * WEEK_DAY_WIDTH + 12
-      : prevDays.length * DAY_WIDTH + 12;
-    bodyRef.current.scrollLeft = offset;
   };
 
   const formatShortDate = (dateStr: string) => {
@@ -834,19 +827,6 @@ export default function CalendarWidget({
 
   const centerMonthLabel = new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  // Compute next upcoming event label
-  const nextEventLabel = (() => {
-    if (!todayStr || allDisplayProjects.length === 0) return null;
-    const upcoming = allDisplayProjects
-      .filter((p) => p.endDate >= todayStr)
-      .sort((a, b) => a.startDate.localeCompare(b.startDate));
-    if (!upcoming.length) return null;
-    const next = upcoming[0];
-    if (next.startDate <= todayStr && next.endDate >= todayStr) return "진행중";
-    const diff = Math.round((new Date(next.startDate + "T00:00:00").getTime() - new Date(todayStr + "T00:00:00").getTime()) / 86400000);
-    return diff === 0 ? "D-Day" : `D-${diff}`;
-  })();
-
   const weekLabel = weekView && weekDays.length > 0 ? (() => {
     const s = weekDays[0].dateObj;
     const e = weekDays[6].dateObj;
@@ -942,14 +922,12 @@ export default function CalendarWidget({
               <a
                 href={`/onboarding?from=${widgetConfigStr}`}
                 title="설정 수정"
-                style={{ fontSize: 9, color: primaryColor, letterSpacing: 0.5, fontWeight: 700, opacity: 0.85, textDecoration: "none", cursor: "pointer" }}
+                style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7, textDecoration: "none", cursor: "pointer" }}
               >
-                {nextEventLabel ?? "PROJECT CAL"}
+                PROJECT CAL
               </a>
             ) : (
-              <span style={{ fontSize: nextEventLabel ? 9 : 6, color: primaryColor, letterSpacing: nextEventLabel ? 0.5 : 1, fontWeight: nextEventLabel ? 700 : 400, opacity: 0.7 }}>
-                {nextEventLabel ?? "PROJECT CAL"}
-              </span>
+              <span style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7 }}>PROJECT CAL</span>
             )}
           </span>
         </div>
@@ -1149,35 +1127,6 @@ export default function CalendarWidget({
         {loading ? (
           <div style={{ textAlign: "center", padding: 12, color: "#888", fontSize: 11 }}>Loading...</div>
         ) : (
-          <div style={{ position: "relative" }}>
-            {/* Left nav arrow overlay */}
-            <button
-              onClick={() => navigate(-1)}
-              style={{
-                position: "absolute", left: 0, top: 0, bottom: 18, zIndex: 50,
-                width: 20, cursor: "pointer", border: "none",
-                background: `linear-gradient(to right, ${bgColor}ee, transparent)`,
-                color: primaryColor, display: "flex", alignItems: "flex-start",
-                paddingTop: 6, justifyContent: "center",
-              }}
-              aria-label="Previous"
-            >
-              <ChevronLeft size={13} strokeWidth={2.5} />
-            </button>
-            {/* Right nav arrow overlay */}
-            <button
-              onClick={() => navigate(1)}
-              style={{
-                position: "absolute", right: 0, top: 0, bottom: 18, zIndex: 50,
-                width: 20, cursor: "pointer", border: "none",
-                background: `linear-gradient(to left, ${bgColor}ee, transparent)`,
-                color: primaryColor, display: "flex", alignItems: "flex-start",
-                paddingTop: 6, justifyContent: "center",
-              }}
-              aria-label="Next"
-            >
-              <ChevronRight size={13} strokeWidth={2.5} />
-            </button>
           <div
             ref={bodyRef}
             onWheel={(e) => { if (bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
@@ -1207,8 +1156,7 @@ export default function CalendarWidget({
                   }}>
                     {/* Date header — drop here to delete */}
                     <div
-                      style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
-                      onClick={scrollToToday}
+                      style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s" }}
                       onDragOver={(e) => { if (dragId) { e.preventDefault(); setDropOnHeader(true); } }}
                       onDragLeave={() => setDropOnHeader(false)}
                       onDrop={async (e) => {
@@ -1678,7 +1626,6 @@ export default function CalendarWidget({
               })}
             </div>
           </div>
-          </div>
         )}
 
         <button onClick={() => { setRowOverrides(new Map()); localStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
@@ -1705,19 +1652,21 @@ export default function CalendarWidget({
         </div>
       )}
 
-      {eventPopup && (
+      {eventPopup && (() => {
+        const popupW = 160, popupH = Math.min(220, groupOptions.length * 29 + 12);
+        const safeLeft = typeof window !== "undefined" ? Math.min(eventPopup.x, window.innerWidth - popupW - 8) : eventPopup.x;
+        const safeTop = typeof window !== "undefined" ? Math.min(eventPopup.y + 6, window.innerHeight - popupH - 8) : eventPopup.y + 6;
+        return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
             style={{
-              position: "fixed", left: eventPopup.x, top: eventPopup.y + 6,
+              position: "fixed", left: safeLeft, top: safeTop,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-              border: "1px solid #eee", padding: "6px 0", minWidth: 150, zIndex: 10001,
+              border: "1px solid #eee", padding: "6px 0", minWidth: popupW,
+              maxHeight: 220, overflowY: "auto", zIndex: 10001,
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 10, color: "#aaa", padding: "2px 12px 6px", fontWeight: 600 }}>
-              {config?.notionConfig.groupProperty}
-            </div>
             {groupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
               return (
@@ -1783,7 +1732,8 @@ export default function CalendarWidget({
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
 
     </>
   );
