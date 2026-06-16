@@ -100,6 +100,21 @@ function OnboardingPageInner() {
   const [importUrl, setImportUrl] = useState("");
   const searchParams = useSearchParams();
 
+  // On mount: restore gcal token from localStorage (skipped if ?from= param provides its own token)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (searchParams.get("from")) return; // ?from= flow handles its own token
+    const token = localStorage.getItem("pcal_gcal_token");
+    const expiry = localStorage.getItem("pcal_gcal_expiry");
+    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
+    if (token && expiry && Date.now() < parseInt(expiry)) {
+      setGcalToken(token);
+      loadGCalCalendars(token);
+    }
+    if (refreshToken) setGcalRefreshToken(refreshToken);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Auto-import from ?from= query param
   useEffect(() => {
     const fromParam = searchParams.get("from");
