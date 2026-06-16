@@ -84,6 +84,7 @@ function OnboardingPageInner() {
 
   // Google Calendar state
   const [gcalToken, setGcalToken] = useState<string | null>(null);
+  const [gcalRefreshToken, setGcalRefreshToken] = useState<string | null>(null);
   const [gcalCalendars, setGcalCalendars] = useState<GCalCalendar[]>([]);
   const [gcalSelectedIds, setGcalSelectedIds] = useState<Set<string>>(new Set());
   const [gcalLoading, setGcalLoading] = useState(false);
@@ -133,6 +134,7 @@ function OnboardingPageInner() {
         }));
         if (json.gcalToken) {
           setGcalToken(json.gcalToken as string);
+          if (json.gcalRefreshToken) setGcalRefreshToken(json.gcalRefreshToken as string);
           const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
           if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
           if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
@@ -198,6 +200,7 @@ function OnboardingPageInner() {
       }));
       if (json.gcalToken) {
         setGcalToken(json.gcalToken as string);
+        if (json.gcalRefreshToken) setGcalRefreshToken(json.gcalRefreshToken as string);
         const restoredIds = Array.isArray(json.gcalCalIds) ? new Set(json.gcalCalIds as string[]) : new Set<string>();
         if (restoredIds.size > 0) setGcalSelectedIds(restoredIds);
         if (json.gcalSyncCalId) setGcalSyncTargetCalId(json.gcalSyncCalId as string);
@@ -398,8 +401,9 @@ function OnboardingPageInner() {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type === "gcal-token") {
-        const { token } = event.data as { type: string; token: string };
+        const { token, refreshToken } = event.data as { type: string; token: string; refreshToken?: string };
         setGcalToken(token);
+        if (refreshToken) setGcalRefreshToken(refreshToken);
         loadGCalCalendars(token);
         window.removeEventListener("message", handleMessage);
         popup?.close();
@@ -437,6 +441,7 @@ function OnboardingPageInner() {
 
   const disconnectGCal = () => {
     setGcalToken(null);
+    setGcalRefreshToken(null);
     setGcalCalendars([]);
     setGcalSelectedIds(new Set());
   };
@@ -465,6 +470,7 @@ function OnboardingPageInner() {
       };
       if (gcalToken) {
         cfg.gcalToken = gcalToken;
+        if (gcalRefreshToken) cfg.gcalRefreshToken = gcalRefreshToken;
         if (gcalSelectedIds.size > 0) cfg.gcalCalIds = [...gcalSelectedIds];
         if (gcalSyncTargetCalId) cfg.gcalSyncCalId = gcalSyncTargetCalId;
         if (gcalShowTimed) cfg.gcalShowTimed = true;
