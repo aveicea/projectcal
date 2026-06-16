@@ -912,8 +912,10 @@ export default function CalendarWidget({
           fontWeight: "bold", letterSpacing: 0.2, flexShrink: 0,
         }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <Link size={12} strokeWidth={2.5} />
-            {headerLabel} Timeline
+            <span onClick={scrollToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+              <Link size={12} strokeWidth={2.5} />
+              {headerLabel} Timeline
+            </span>
             <span style={{ display: "flex", gap: 2, alignItems: "center", marginLeft: 2 }}>
               <button onClick={() => weekView ? navigateWeek(-1) : navigateMonth(-1)}
                 aria-label="Previous" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
