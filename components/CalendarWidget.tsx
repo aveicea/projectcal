@@ -172,8 +172,13 @@ export default function CalendarWidget({
 
   const gcalRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gcalRefreshInFlight = useRef<Promise<string | null> | null>(null);
+  // In-memory copies so Google auth survives even when localStorage is blocked
+  // (iOS Safari third-party iframe / Notion embed). Seeded from the embed URL.
+  const gcalRefreshTokenRef = useRef<string | null>(initialGcalRefreshToken ?? null);
+  const gcalExpiryRef = useRef<number>(0);
 
   const saveGcalToken = (token: string, expiry: number) => {
+    gcalExpiryRef.current = expiry;
     safeStorage.setItem("pcal_gcal_token", token);
     safeStorage.setItem("pcal_gcal_expiry", String(expiry));
     setGcalToken(token);
@@ -186,7 +191,7 @@ export default function CalendarWidget({
 
   const refreshGcalToken = (): Promise<string | null> => {
     if (gcalRefreshInFlight.current) return gcalRefreshInFlight.current;
-    const refreshToken = safeStorage.getItem("pcal_gcal_refresh_token");
+    const refreshToken = gcalRefreshTokenRef.current ?? safeStorage.getItem("pcal_gcal_refresh_token");
     if (!refreshToken) return Promise.resolve(null);
     gcalRefreshInFlight.current = (async () => {
       try {
@@ -214,12 +219,13 @@ export default function CalendarWidget({
     if (typeof window === "undefined") return;
 
     if (initialGcalRefreshToken) {
+      gcalRefreshTokenRef.current = initialGcalRefreshToken;
       safeStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
     }
 
     const storedToken = safeStorage.getItem("pcal_gcal_token");
     const storedExpiry = parseInt(safeStorage.getItem("pcal_gcal_expiry") ?? "0");
-    const hasRefreshToken = !!safeStorage.getItem("pcal_gcal_refresh_token");
+    const hasRefreshToken = !!(gcalRefreshTokenRef.current ?? safeStorage.getItem("pcal_gcal_refresh_token"));
 
     if (storedToken && Date.now() < storedExpiry - 60000) {
       // Valid cached token — use it and arm refresh timer
@@ -508,9 +514,13 @@ export default function CalendarWidget({
       if (event.data?.type === "gcal-token") {
         const { token, refreshToken, expiresIn } = event.data as { type: string; token: string; refreshToken?: string; expiresIn: string };
         const expiry = Date.now() + parseInt(expiresIn) * 1000 - 60000;
+        gcalExpiryRef.current = expiry;
         safeStorage.setItem("pcal_gcal_token", token);
         safeStorage.setItem("pcal_gcal_expiry", String(expiry));
-        if (refreshToken) safeStorage.setItem("pcal_gcal_refresh_token", refreshToken);
+        if (refreshToken) {
+          gcalRefreshTokenRef.current = refreshToken;
+          safeStorage.setItem("pcal_gcal_refresh_token", refreshToken);
+        }
         setGcalToken(token);
         window.removeEventListener("message", handleMessage);
         popup?.close();
@@ -526,6 +536,8 @@ export default function CalendarWidget({
     setSelectedCalendarIds(new Set());
     setGcalSyncedNotionIds(new Set());
     setShowGCalPanel(false);
+    gcalRefreshTokenRef.current = null;
+    gcalExpiryRef.current = 0;
     safeStorage.removeItem("pcal_gcal_token");
     safeStorage.removeItem("pcal_gcal_expiry");
     safeStorage.removeItem("pcal_gcal_selected");
@@ -619,7 +631,7 @@ export default function CalendarWidget({
   const renameGCalEvent = async (seg: AnySegment, newTitle: string, prevTitle: string) => {
     let token = gcalToken;
     if (!token || !seg.gcalEventId) return;
-    const expiry = parseInt(safeStorage.getItem("pcal_gcal_expiry") ?? "0");
+    const expiry = gcalExpiryRef.current || parseInt(safeStorage.getItem("pcal_gcal_expiry") ?? "0");
     if (Date.now() > expiry) token = await refreshGcalToken() ?? token;
     try {
       const res = await fetch("/api/gcal", {
