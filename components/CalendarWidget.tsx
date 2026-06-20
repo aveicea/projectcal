@@ -20,6 +20,7 @@ import {
   addDays,
   daysBetween,
 } from "@/lib/calendarUtils";
+import { safeStorage } from "@/lib/safeStorage";
 
 // ── GCal types ──────────────────────────────────────────────────────────────
 interface GCalEventRaw {
@@ -173,8 +174,8 @@ export default function CalendarWidget({
   const gcalRefreshInFlight = useRef<Promise<string | null> | null>(null);
 
   const saveGcalToken = (token: string, expiry: number) => {
-    localStorage.setItem("pcal_gcal_token", token);
-    localStorage.setItem("pcal_gcal_expiry", String(expiry));
+    safeStorage.setItem("pcal_gcal_token", token);
+    safeStorage.setItem("pcal_gcal_expiry", String(expiry));
     setGcalToken(token);
     if (gcalRefreshTimer.current) clearTimeout(gcalRefreshTimer.current);
     const refreshIn = expiry - Date.now() - 5 * 60 * 1000;
@@ -185,7 +186,7 @@ export default function CalendarWidget({
 
   const refreshGcalToken = (): Promise<string | null> => {
     if (gcalRefreshInFlight.current) return gcalRefreshInFlight.current;
-    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
+    const refreshToken = safeStorage.getItem("pcal_gcal_refresh_token");
     if (!refreshToken) return Promise.resolve(null);
     gcalRefreshInFlight.current = (async () => {
       try {
@@ -213,12 +214,12 @@ export default function CalendarWidget({
     if (typeof window === "undefined") return;
 
     if (initialGcalRefreshToken) {
-      localStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
+      safeStorage.setItem("pcal_gcal_refresh_token", initialGcalRefreshToken);
     }
 
-    const storedToken = localStorage.getItem("pcal_gcal_token");
-    const storedExpiry = parseInt(localStorage.getItem("pcal_gcal_expiry") ?? "0");
-    const hasRefreshToken = !!localStorage.getItem("pcal_gcal_refresh_token");
+    const storedToken = safeStorage.getItem("pcal_gcal_token");
+    const storedExpiry = parseInt(safeStorage.getItem("pcal_gcal_expiry") ?? "0");
+    const hasRefreshToken = !!safeStorage.getItem("pcal_gcal_refresh_token");
 
     if (storedToken && Date.now() < storedExpiry - 60000) {
       // Valid cached token — use it and arm refresh timer
@@ -239,41 +240,41 @@ export default function CalendarWidget({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const synced = localStorage.getItem("pcal_synced_ids");
+    const synced = safeStorage.getItem("pcal_synced_ids");
     if (synced) {
       try { setSyncedIds(new Set(JSON.parse(synced))); } catch { /* ignore */ }
     }
-    const showTimed = localStorage.getItem("pcal_gcal_show_timed");
+    const showTimed = safeStorage.getItem("pcal_gcal_show_timed");
     if (showTimed === "true") setGcalShowTimed(true);
     else if (initialGcalShowTimed) setGcalShowTimed(true);
 
-    const savedCalColors = localStorage.getItem("pcal_gcal_colors");
+    const savedCalColors = safeStorage.getItem("pcal_gcal_colors");
     if (savedCalColors) {
       try { setGcalColorOverrides({ ...JSON.parse(savedCalColors), ...initialGcalColorOverrides }); } catch { if (initialGcalColorOverrides) setGcalColorOverrides(initialGcalColorOverrides); }
     } else if (initialGcalColorOverrides) {
       setGcalColorOverrides(initialGcalColorOverrides);
     }
 
-    const savedBorderColors = localStorage.getItem("pcal_gcal_border_colors");
+    const savedBorderColors = safeStorage.getItem("pcal_gcal_border_colors");
     if (savedBorderColors) {
       try { setGcalBorderColorOverrides({ ...JSON.parse(savedBorderColors), ...initialGcalBorderColorOverrides }); } catch { if (initialGcalBorderColorOverrides) setGcalBorderColorOverrides(initialGcalBorderColorOverrides); }
     } else if (initialGcalBorderColorOverrides) {
       setGcalBorderColorOverrides(initialGcalBorderColorOverrides);
     }
 
-    const savedGroupColors = localStorage.getItem("pcal_group_colors");
+    const savedGroupColors = safeStorage.getItem("pcal_group_colors");
     if (savedGroupColors) {
       try { setGroupColorOverrides({ ...JSON.parse(savedGroupColors), ...initialGroupColors }); } catch { if (initialGroupColors) setGroupColorOverrides(initialGroupColors); }
     } else if (initialGroupColors) {
       setGroupColorOverrides(initialGroupColors);
     }
 
-    const savedCalOrder = localStorage.getItem("pcal_gcal_order");
+    const savedCalOrder = safeStorage.getItem("pcal_gcal_order");
     if (savedCalOrder) {
       try { setGcalCalendarOrder(JSON.parse(savedCalOrder)); } catch { /* ignore */ }
     }
 
-    const savedRowOverrides = localStorage.getItem("pcal_row_overrides");
+    const savedRowOverrides = safeStorage.getItem("pcal_row_overrides");
     if (savedRowOverrides) {
       try {
         const obj = JSON.parse(savedRowOverrides) as Record<string, number>;
@@ -300,7 +301,7 @@ export default function CalendarWidget({
         if (Array.isArray(data.items)) {
           const cals: GCalCalendar[] = data.items;
           setGcalCalendars(cals);
-          const saved = localStorage.getItem("pcal_gcal_selected");
+          const saved = safeStorage.getItem("pcal_gcal_selected");
           if (saved) {
             try {
               const savedIds = new Set<string>(JSON.parse(saved));
@@ -323,7 +324,7 @@ export default function CalendarWidget({
           const newToken = await refreshGcalToken();
           if (!newToken) {
             setGcalToken(null);
-            localStorage.removeItem("pcal_gcal_token");
+            safeStorage.removeItem("pcal_gcal_token");
           }
         }
       });
@@ -468,7 +469,7 @@ export default function CalendarWidget({
           const newToken = await refreshGcalToken();
           if (!newToken) {
             setGcalToken(null);
-            localStorage.removeItem("pcal_gcal_token");
+            safeStorage.removeItem("pcal_gcal_token");
           }
         }
         console.error("GCal fetch error:", e);
@@ -507,9 +508,9 @@ export default function CalendarWidget({
       if (event.data?.type === "gcal-token") {
         const { token, refreshToken, expiresIn } = event.data as { type: string; token: string; refreshToken?: string; expiresIn: string };
         const expiry = Date.now() + parseInt(expiresIn) * 1000 - 60000;
-        localStorage.setItem("pcal_gcal_token", token);
-        localStorage.setItem("pcal_gcal_expiry", String(expiry));
-        if (refreshToken) localStorage.setItem("pcal_gcal_refresh_token", refreshToken);
+        safeStorage.setItem("pcal_gcal_token", token);
+        safeStorage.setItem("pcal_gcal_expiry", String(expiry));
+        if (refreshToken) safeStorage.setItem("pcal_gcal_refresh_token", refreshToken);
         setGcalToken(token);
         window.removeEventListener("message", handleMessage);
         popup?.close();
@@ -525,10 +526,10 @@ export default function CalendarWidget({
     setSelectedCalendarIds(new Set());
     setGcalSyncedNotionIds(new Set());
     setShowGCalPanel(false);
-    localStorage.removeItem("pcal_gcal_token");
-    localStorage.removeItem("pcal_gcal_expiry");
-    localStorage.removeItem("pcal_gcal_selected");
-    localStorage.removeItem("pcal_gcal_refresh_token");
+    safeStorage.removeItem("pcal_gcal_token");
+    safeStorage.removeItem("pcal_gcal_expiry");
+    safeStorage.removeItem("pcal_gcal_selected");
+    safeStorage.removeItem("pcal_gcal_refresh_token");
   };
 
   const toggleCalendar = (calId: string) => {
@@ -536,7 +537,7 @@ export default function CalendarWidget({
       const next = new Set(prev);
       if (next.has(calId)) next.delete(calId);
       else next.add(calId);
-      localStorage.setItem("pcal_gcal_selected", JSON.stringify([...next]));
+      safeStorage.setItem("pcal_gcal_selected", JSON.stringify([...next]));
       return next;
     });
   };
@@ -564,13 +565,13 @@ export default function CalendarWidget({
       });
       if (res.status === 401) {
         setGcalToken(null);
-        localStorage.removeItem("pcal_gcal_token");
+        safeStorage.removeItem("pcal_gcal_token");
         return;
       }
       if (res.ok) {
         setSyncedIds((prev) => {
           const next = new Set([...prev, project.id]);
-          localStorage.setItem("pcal_synced_ids", JSON.stringify([...next]));
+          safeStorage.setItem("pcal_synced_ids", JSON.stringify([...next]));
           return next;
         });
       }
@@ -600,7 +601,7 @@ export default function CalendarWidget({
       });
       if (res.status === 401) {
         setGcalToken(null);
-        localStorage.removeItem("pcal_gcal_token");
+        safeStorage.removeItem("pcal_gcal_token");
         // Revert optimistic update
         setDateOverrides((prev) => { const next = new Map(prev); next.delete(seg.id); return next; });
       } else if (!res.ok) {
@@ -618,7 +619,7 @@ export default function CalendarWidget({
   const renameGCalEvent = async (seg: AnySegment, newTitle: string, prevTitle: string) => {
     let token = gcalToken;
     if (!token || !seg.gcalEventId) return;
-    const expiry = parseInt(localStorage.getItem("pcal_gcal_expiry") ?? "0");
+    const expiry = parseInt(safeStorage.getItem("pcal_gcal_expiry") ?? "0");
     if (Date.now() > expiry) token = await refreshGcalToken() ?? token;
     try {
       const res = await fetch("/api/gcal", {
@@ -636,7 +637,7 @@ export default function CalendarWidget({
         if (refreshed) {
           renameGCalEvent(seg, newTitle, prevTitle);
         } else {
-          setGcalToken(null); localStorage.removeItem("pcal_gcal_token");
+          setGcalToken(null); safeStorage.removeItem("pcal_gcal_token");
           setGcalProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, title: prevTitle } : p));
         }
       } else if (!res.ok) {
@@ -1045,7 +1046,7 @@ export default function CalendarWidget({
                         if (from === -1 || to === -1) return;
                         allIds.splice(from, 1); allIds.splice(to, 0, panelDragCalId.current!);
                         setGcalCalendarOrder(allIds);
-                        localStorage.setItem("pcal_gcal_order", JSON.stringify(allIds));
+                        safeStorage.setItem("pcal_gcal_order", JSON.stringify(allIds));
                         panelDragCalId.current = null;
                       }}
                       onClick={() => toggleCalendar(cal.id)}
@@ -1070,7 +1071,7 @@ export default function CalendarWidget({
                           e.stopPropagation();
                           const next = { ...gcalColorOverrides, [cal.id]: e.target.value };
                           setGcalColorOverrides(next);
-                          localStorage.setItem("pcal_gcal_colors", JSON.stringify(next));
+                          safeStorage.setItem("pcal_gcal_colors", JSON.stringify(next));
                         }}
                         style={{ width: 14, height: 14, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}
                       />
@@ -1086,7 +1087,7 @@ export default function CalendarWidget({
                           onChange={(e) => {
                             const next = { ...gcalBorderColorOverrides, [cal.id]: e.target.value };
                             setGcalBorderColorOverrides(next);
-                            localStorage.setItem("pcal_gcal_border_colors", JSON.stringify(next));
+                            safeStorage.setItem("pcal_gcal_border_colors", JSON.stringify(next));
                           }}
                           style={{ width: 14, height: 14, padding: 0, border: "1px dashed #aaa", borderRadius: "50%", cursor: "pointer", opacity: 1 }}
                         />
@@ -1125,7 +1126,7 @@ export default function CalendarWidget({
                 onClick={() => {
                   const next = !gcalShowTimed;
                   setGcalShowTimed(next);
-                  localStorage.setItem("pcal_gcal_show_timed", String(next));
+                  safeStorage.setItem("pcal_gcal_show_timed", String(next));
                 }}
                 style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0" }}
               >
@@ -1309,7 +1310,7 @@ export default function CalendarWidget({
                               const next = bumpRows(sourceId, dropRow, prev);
                               const obj: Record<string, number> = {};
                               next.forEach((v, k) => { obj[k] = v; });
-                              localStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
+                              safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
                               return next;
                             });
                           } else if (mode === "resize-end") {
@@ -1335,7 +1336,7 @@ export default function CalendarWidget({
                               const next = bumpRows(sourceId, dropRow, prev);
                               const obj: Record<string, number> = {};
                               next.forEach((v, k) => { obj[k] = v; });
-                              localStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
+                              safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
                               return next;
                             });
                           } else if (mode === "resize-end") {
@@ -1671,7 +1672,7 @@ export default function CalendarWidget({
           </div>
         )}
 
-        <button onClick={() => { setRowOverrides(new Map()); localStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
+        <button onClick={() => { setRowOverrides(new Map()); safeStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
           style={{
             cursor: "pointer", color: primaryColor, display: "flex",
             justifyContent: "center", alignItems: "center", transition: "all .2s",

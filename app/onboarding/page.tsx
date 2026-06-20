@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Settings2, CalendarDays, Type, Palette, Copy, Monitor } from "lucide-react";
 import { DEFAULT_BAR_COLORS, Project } from "@/lib/calendarUtils";
+import { safeStorage } from "@/lib/safeStorage";
 
 const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
   ssr: false,
@@ -104,9 +105,9 @@ function OnboardingPageInner() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (searchParams.get("from")) return; // ?from= flow handles its own token
-    const token = localStorage.getItem("pcal_gcal_token");
-    const expiry = localStorage.getItem("pcal_gcal_expiry");
-    const refreshToken = localStorage.getItem("pcal_gcal_refresh_token");
+    const token = safeStorage.getItem("pcal_gcal_token");
+    const expiry = safeStorage.getItem("pcal_gcal_expiry");
+    const refreshToken = safeStorage.getItem("pcal_gcal_refresh_token");
     if (token && expiry && Date.now() < parseInt(expiry)) {
       setGcalToken(token);
       loadGCalCalendars(token);
