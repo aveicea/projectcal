@@ -12,6 +12,7 @@ interface Config {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    dependencyProperty?: string;
   };
   theme: {
     primaryColor: string;
@@ -55,6 +56,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         dateProperty: json.dateProp ?? "날짜",
         titleProperty: json.titleProp ?? "제목",
         groupProperty: json.groupProp || undefined,
+        dependencyProperty: json.dependsProp || undefined,
       },
       theme: {
         primaryColor: json.primaryColor ?? "#E8A8C0",

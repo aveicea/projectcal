@@ -7,6 +7,8 @@ interface EventConfig {
   dateProp: string;
   titleProp: string;
   groupProp?: string;
+  // Notion 관계형 "선행 작업"(predecessor) 속성 이름
+  dependsProp?: string;
 }
 
 type RollupValue =
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
     // 1차: 각 페이지의 기본 데이터와 관계형 ID 수집
     type RawEvent = {
       id: string; title: string; startDate: string; endDate: string;
-      pageUrl: string; group?: string; relationIds?: string[];
+      pageUrl: string; group?: string; relationIds?: string[]; dependsOn?: string[];
     };
 
     const rawEvents: RawEvent[] = [];
@@ -100,11 +102,21 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // 선행 작업(predecessor) 관계형 ID 수집 — 같은 DB 내 자기참조 관계
+      let dependsOn: string[] | undefined;
+      if (config.dependsProp) {
+        const dp = props[config.dependsProp];
+        if (dp?.type === "relation" && dp.relation && dp.relation.length > 0) {
+          dependsOn = dp.relation.map((r) => r.id);
+        }
+      }
+
       rawEvents.push({
         id: page.id, title, startDate: eventStart, endDate: eventEnd,
         pageUrl: (page as { url?: string }).url ?? "#",
         ...(group ? { group } : {}),
         ...(relationIds ? { relationIds } : {}),
+        ...(dependsOn ? { dependsOn } : {}),
       });
     }
 
