@@ -6,6 +6,8 @@ export interface Project {
   pageUrl: string;
   color?: string;
   group?: string;
+  // Notion 관계형 의존성: 이 작업의 "선행 작업"(predecessor) 페이지 ID 목록
+  dependsOn?: string[];
 }
 
 export interface ProjectSegment extends Project {
@@ -219,6 +221,74 @@ export function assignRowsGrouped(projects: ProjectSegment[]): Map<string, numbe
   }
 
   return result;
+}
+
+// Dependency-aware row assignment (Notion timeline style):
+// - A successor is placed on the SAME row as its predecessor when that row is
+//   free at the successor's time → the connecting line stays on one line.
+// - When the predecessor's row is occupied, the successor is placed on the
+//   closest free row to it (searching outward) so linked bars stay near.
+// - Rows never overlap in time, and used rows are compacted to 0..n.
+export function assignRowsWithDeps(projects: ProjectSegment[]): Map<string, number> {
+  const rowMap = new Map<string, number>();
+  if (projects.length === 0) return rowMap;
+
+  const sorted = [...projects].sort(
+    (a, b) =>
+      a.startDate.localeCompare(b.startDate) ||
+      a.endDate.localeCompare(b.endDate)
+  );
+
+  const rowOcc = new Map<number, Array<{ s: string; e: string }>>();
+  const conflicts = (row: number, s: string, e: string) => {
+    const occ = rowOcc.get(row);
+    return occ ? occ.some((o) => s <= o.e && e >= o.s) : false;
+  };
+  const place = (id: string, row: number, s: string, e: string) => {
+    rowMap.set(id, row);
+    if (!rowOcc.has(row)) rowOcc.set(row, []);
+    rowOcc.get(row)!.push({ s, e });
+  };
+
+  for (const p of sorted) {
+    // Rows of already-placed predecessors (its "선행 작업")
+    const prefRows: number[] = [];
+    for (const depId of p.dependsOn ?? []) {
+      const r = rowMap.get(depId);
+      if (r != null && !prefRows.includes(r)) prefRows.push(r);
+    }
+
+    let chosen = -1;
+    const tried = new Set<number>();
+
+    // 1) Try to sit on a predecessor's exact row (→ same line, horizontal link)
+    for (const r of prefRows) {
+      tried.add(r);
+      if (!conflicts(r, p.startDate, p.endDate)) { chosen = r; break; }
+    }
+
+    // 2) Otherwise search outward from the nearest predecessor row, then upward
+    if (chosen === -1) {
+      const base = prefRows.length ? Math.min(...prefRows) : 0;
+      for (let d = 0; d < 500 && chosen === -1; d++) {
+        for (const r of d === 0 ? [base] : [base + d, base - d]) {
+          if (r < 0 || tried.has(r)) continue;
+          tried.add(r);
+          if (!conflicts(r, p.startDate, p.endDate)) { chosen = r; break; }
+        }
+      }
+      if (chosen === -1) chosen = base;
+    }
+
+    place(p.id, chosen, p.startDate, p.endDate);
+  }
+
+  // Compact used rows to a dense 0..n range (preserve relative order/grouping)
+  const usedRows = [...new Set(rowMap.values())].sort((a, b) => a - b);
+  const dense = new Map(usedRows.map((r, i) => [r, i]));
+  for (const [id, r] of rowMap) rowMap.set(id, dense.get(r)!);
+
+  return rowMap;
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

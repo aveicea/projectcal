@@ -10,6 +10,7 @@ import {
   getDaysInWeek,
   getWeekStart,
   assignRows,
+  assignRowsWithDeps,
   assignColors,
   hexToRgba,
   lightenColor,
@@ -55,6 +56,7 @@ interface CalendarConfig {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    dependencyProperty?: string;
   };
   theme: CalendarTheme;
 }
@@ -738,6 +740,7 @@ export default function CalendarWidget({
               dateProp: config.notionConfig.dateProperty,
               titleProp: config.notionConfig.titleProperty,
               ...(config.notionConfig.groupProperty ? { groupProp: config.notionConfig.groupProperty } : {}),
+              ...(config.notionConfig.dependencyProperty ? { dependsProp: config.notionConfig.dependencyProperty } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -809,7 +812,12 @@ export default function CalendarWidget({
 
   const allDisplayProjects: AnySegment[] = [...effectiveGCalProjects, ...effectiveNotionProjects];
 
-  const rowMap = assignRows(allDisplayProjects as ProjectSegment[], multiRow);
+  // Dependency-aware layout when any event has predecessors ("선행 작업"),
+  // otherwise keep the original packing behavior unchanged.
+  const hasDeps = allDisplayProjects.some((p) => p.dependsOn && p.dependsOn.length > 0);
+  const rowMap = hasDeps
+    ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
+    : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
@@ -818,6 +826,50 @@ export default function CalendarWidget({
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
   const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
+
+  // ── Dependency connector lines (선행 → 후속) ─────────────────────────────────
+  // Geometry mirrors the day-grid: each column is `dayWidth` wide, the grid has
+  // 12px horizontal padding, and bars start below the date header (HEADER_OFFSET).
+  const GRID_PAD = 12;
+  const HEADER_OFFSET = 40; // date header height (34) + marginBottom (6)
+  const dependencyConnectors: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; sameRow: boolean }> = [];
+  // Bars to mask out so connector lines never show through the (translucent) bars.
+  const barMaskRects: Array<{ id: string; x: number; y: number; w: number; h: number }> = [];
+  if (hasDeps && displayDays.length > 0) {
+    const dateIndex = new Map<string, number>();
+    displayDays.forEach((d, i) => dateIndex.set(d.dateStr, i));
+    const firstDate = displayDays[0].dateStr;
+    const idxFor = (date: string) => {
+      const i = dateIndex.get(date);
+      if (i != null) return i;
+      return date < firstDate ? 0 : displayDays.length - 1;
+    };
+    const byId = new Map(allDisplayProjects.map((p) => [p.id, p]));
+    for (const succ of allDisplayProjects) {
+      if (!succ.dependsOn || succ.dependsOn.length === 0) continue;
+      const sRow = effectiveRowMap.get(succ.id) ?? 0;
+      const x2 = GRID_PAD + idxFor(succ.startDate) * dayWidth;
+      const y2 = HEADER_OFFSET + sRow * ROW_HEIGHT + BAR_HEIGHT / 2;
+      for (const predId of succ.dependsOn) {
+        const pred = byId.get(predId);
+        if (!pred) continue; // predecessor not in the current window
+        const pRow = effectiveRowMap.get(pred.id) ?? 0;
+        const x1 = GRID_PAD + (idxFor(pred.endDate) + 1) * dayWidth;
+        const y1 = HEADER_OFFSET + pRow * ROW_HEIGHT + BAR_HEIGHT / 2;
+        dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow });
+      }
+    }
+    if (dependencyConnectors.length > 0) {
+      for (const p of allDisplayProjects) {
+        const row = effectiveRowMap.get(p.id) ?? 0;
+        const x = GRID_PAD + idxFor(p.startDate) * dayWidth;
+        const xEnd = GRID_PAD + (idxFor(p.endDate) + 1) * dayWidth;
+        barMaskRects.push({ id: p.id, x, y: HEADER_OFFSET + row * ROW_HEIGHT, w: xEnd - x, h: BAR_HEIGHT });
+      }
+    }
+  }
+  const connectorSvgWidth = GRID_PAD * 2 + displayDays.length * dayWidth;
+  const connectorSvgHeight = HEADER_OFFSET + totalRows * ROW_HEIGHT;
 
   function bumpRows(movedId: string, newRow: number, prevOverrides: Map<string, number>): Map<string, number> {
     const uniqueById = new Map<string, AnySegment>();
@@ -1191,7 +1243,54 @@ export default function CalendarWidget({
               scrollbarWidth: "thin", scrollbarColor: `${primaryColor}40 transparent`,
             }}
           >
-            <div style={{ display: "flex", padding: "0 12px", minWidth: "min-content" }}>
+            <div style={{ display: "flex", padding: "0 12px", minWidth: "min-content", position: "relative" }}>
+              {/* Dependency connector lines (선행 작업 → 후속 작업) */}
+              {dependencyConnectors.length > 0 && (
+                <svg
+                  width={connectorSvgWidth}
+                  height={connectorSvgHeight}
+                  style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 3, overflow: "visible" }}
+                >
+                  <defs>
+                    {/* Mask: white = line visible, black bars = line hidden where it overlaps a bar */}
+                    <mask id="pcal-dep-mask" maskUnits="userSpaceOnUse" x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight}>
+                      <rect x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight} fill="white" />
+                      {barMaskRects.map((r) => (
+                        <rect key={r.id} x={r.x} y={r.y} width={r.w} height={r.h} rx={4} fill="black" />
+                      ))}
+                    </mask>
+                  </defs>
+                  {/* Lines: masked so they never show through the translucent bars */}
+                  <g mask="url(#pcal-dep-mask)">
+                    {dependencyConnectors.map((c) => {
+                      const dx = Math.max(10, Math.abs(c.x2 - c.x1) / 2);
+                      const d = c.sameRow
+                        ? `M ${c.x1} ${c.y1} L ${c.x2} ${c.y2}`
+                        : `M ${c.x1} ${c.y1} C ${c.x1 + dx} ${c.y1}, ${c.x2 - dx} ${c.y2}, ${c.x2} ${c.y2}`;
+                      return (
+                        <path
+                          key={c.id}
+                          d={d}
+                          fill="none"
+                          stroke={primaryColor}
+                          strokeWidth={1.75}
+                          strokeOpacity={0.85}
+                        />
+                      );
+                    })}
+                  </g>
+                  {/* Arrowheads: NOT masked → always visible at the connection point */}
+                  <g>
+                    {dependencyConnectors.map((c) => (
+                      <path
+                        key={`${c.id}__arrow`}
+                        d={`M ${c.x2 - 5} ${c.y2 - 3.2} L ${c.x2} ${c.y2} L ${c.x2 - 5} ${c.y2 + 3.2} Z`}
+                        fill={primaryColor}
+                      />
+                    ))}
+                  </g>
+                </svg>
+              )}
               {displayDays.map((day) => {
                 const { dateStr } = day;
                 const isMonthBoundary = day.day === 1;

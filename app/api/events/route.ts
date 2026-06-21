@@ -7,6 +7,8 @@ interface EventConfig {
   dateProp: string;
   titleProp: string;
   groupProp?: string;
+  // Notion 관계형 "선행 작업"(predecessor) 속성 이름
+  dependsProp?: string;
 }
 
 type RollupValue =
@@ -48,10 +50,28 @@ export async function POST(req: NextRequest) {
     // 1차: 각 페이지의 기본 데이터와 관계형 ID 수집
     type RawEvent = {
       id: string; title: string; startDate: string; endDate: string;
-      pageUrl: string; group?: string; relationIds?: string[];
+      pageUrl: string; group?: string; relationIds?: string[]; dependsOn?: string[];
     };
 
     const rawEvents: RawEvent[] = [];
+
+    // 의존성(선행 작업) 속성 결정: 명시 설정이 없으면 노션이 의존성 기능을 켤 때
+    // 자동 생성하는 "선행 작업"(predecessor) 관계형을 이름으로 자동 탐지한다.
+    // (이미 받아온 페이지 속성에서 찾으므로 추가 API 호출 없음)
+    let dependsProp = config.dependsProp;
+    if (!dependsProp) {
+      const predKeys = ["선행", "종속", "이전", "blocked by", "blocked_by", "blocked", "depends", "dependency", "dependencies", "predecessor"];
+      const firstFull = response.results.find(isFullPage);
+      if (firstFull) {
+        const props = firstFull.properties as PropMap;
+        for (const [name, prop] of Object.entries(props)) {
+          if (prop.type === "relation" && predKeys.some((k) => name.toLowerCase().includes(k))) {
+            dependsProp = name;
+            break;
+          }
+        }
+      }
+    }
 
     for (const page of response.results.filter(isFullPage)) {
       const props = page.properties as PropMap;
@@ -100,11 +120,21 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // 선행 작업(predecessor) 관계형 ID 수집 — 같은 DB 내 자기참조 관계
+      let dependsOn: string[] | undefined;
+      if (dependsProp) {
+        const dp = props[dependsProp];
+        if (dp?.type === "relation" && dp.relation && dp.relation.length > 0) {
+          dependsOn = dp.relation.map((r) => r.id);
+        }
+      }
+
       rawEvents.push({
         id: page.id, title, startDate: eventStart, endDate: eventEnd,
         pageUrl: (page as { url?: string }).url ?? "#",
         ...(group ? { group } : {}),
         ...(relationIds ? { relationIds } : {}),
+        ...(dependsOn ? { dependsOn } : {}),
       });
     }
 

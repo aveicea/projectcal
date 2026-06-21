@@ -36,6 +36,7 @@ interface Settings {
   dateProperty: string;
   titleProperty: string;
   groupProperty: string;
+  dependencyProperty: string;
   primaryColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -47,7 +48,7 @@ interface Settings {
   weekView: boolean;
 }
 
-function makePreviewProjects(multiRow: boolean): Project[] {
+function makePreviewProjects(multiRow: boolean, withDeps = false): Project[] {
   const now = new Date();
   const y = now.getFullYear();
   const m = now.getMonth();
@@ -65,6 +66,16 @@ function makePreviewProjects(multiRow: boolean): Project[] {
       { id: "p6", title: "Code Review", startDate: d(6),  endDate: d(9),  pageUrl: "#" },
       { id: "p7", title: "Bug Fixes",   startDate: d(17), endDate: d(20), pageUrl: "#" }
     );
+  }
+  if (withDeps) {
+    // 선행 작업 → 후속 작업 체인 (p1 → p2 → p3 → p4)
+    const dep = (id: string, deps: string[]) => {
+      const p = base.find((b) => b.id === id);
+      if (p) p.dependsOn = deps;
+    };
+    dep("p2", ["p1"]);
+    dep("p3", ["p2"]);
+    dep("p4", ["p3"]);
   }
   return base;
 }
@@ -138,6 +149,7 @@ function OnboardingPageInner() {
           dateProperty: (json.dateProp as string) ?? prev.dateProperty,
           titleProperty: (json.titleProp as string) ?? prev.titleProperty,
           groupProperty,
+          dependencyProperty: (json.dependsProp as string) ?? "",
           primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
           backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
           backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
@@ -204,6 +216,7 @@ function OnboardingPageInner() {
         dateProperty: (json.dateProp as string) ?? prev.dateProperty,
         titleProperty: (json.titleProp as string) ?? prev.titleProperty,
         groupProperty,
+        dependencyProperty: (json.dependsProp as string) ?? "",
         primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
         backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
         backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
@@ -255,6 +268,7 @@ function OnboardingPageInner() {
     dateProperty: "날짜",
     titleProperty: "제목",
     groupProperty: "",
+    dependencyProperty: "",
     primaryColor: "#B5E3F0",
     backgroundColor: "#FFFCF9",
     backgroundOpacity: 100,
@@ -358,6 +372,7 @@ function OnboardingPageInner() {
           dateProperty: json.data.dateProperty || prev.dateProperty,
           titleProperty: json.data.titleProperty || prev.titleProperty,
           groupProperty: "",
+          dependencyProperty: "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
         setDateProperties(json.data.dateProperties ?? []);
@@ -474,6 +489,7 @@ function OnboardingPageInner() {
         dateProp: settings.dateProperty,
         titleProp: settings.titleProperty,
         ...(settings.groupProperty.trim() ? { groupProp: settings.groupProperty.trim() } : {}),
+        ...(settings.dependencyProperty.trim() ? { dependsProp: settings.dependencyProperty.trim() } : {}),
         primaryColor: settings.primaryColor,
         backgroundColor: settings.backgroundColor,
         backgroundOpacity: settings.backgroundOpacity,
@@ -997,6 +1013,35 @@ function OnboardingPageInner() {
                     )}
                   </div>
                 </div>
+                {/* 의존성(선행 작업) 속성 — Notion 관계형 연결을 선으로 표시 */}
+                {(() => {
+                  const relationProps = groupableProperties.filter((p) => p.type === "relation");
+                  return (
+                    <div style={{ marginTop: 12 }}>
+                      <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                        🔗 선행 작업(의존성) 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(선택)</span>
+                      </label>
+                      {relationProps.length > 0 ? (
+                        <select className="soft-select" value={settings.dependencyProperty}
+                          onChange={(e) => update("dependencyProperty", e.target.value)}
+                          style={{ marginBottom: 0, fontSize: 13 }}>
+                          <option value="">— 없음 —</option>
+                          {relationProps.map((p) => (
+                            <option key={p.name} value={p.name}>{p.name} (relation)</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input className="soft-input" value={settings.dependencyProperty}
+                          onChange={(e) => update("dependencyProperty", e.target.value)}
+                          placeholder="예: 선행 작업"
+                          style={{ marginBottom: 0, fontSize: 13 }} />
+                      )}
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                        비워두면 노션의 &quot;선행 작업&quot; 관계형을 자동 인식합니다. 선행 → 후속이 선으로 연결되고, 연결된 항목은 같은 줄에 붙여 배치됩니다
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 라이브 프리뷰 */}
@@ -1004,7 +1049,7 @@ function OnboardingPageInner() {
                 <div style={{ textAlign: "center", marginBottom: 16, fontSize: 14, color: "#888", fontWeight: 600 }}>LIVE PREVIEW</div>
                 <div style={{ background: settings.darkMode ? "#191919" : "white", borderRadius: 8, overflow: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", display: "flex", justifyContent: "center" }}>
                   <div style={{ padding: 10 }}>
-                    <CalendarWidget configId="preview" theme={previewTheme} fontFamily={settings.fontFamily} previewProjects={makePreviewProjects(settings.multiRow)} />
+                    <CalendarWidget configId="preview" theme={previewTheme} fontFamily={settings.fontFamily} previewProjects={makePreviewProjects(settings.multiRow, !!settings.dependencyProperty.trim())} />
                   </div>
                 </div>
               </div>
