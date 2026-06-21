@@ -1239,7 +1239,7 @@ export default function CalendarWidget({
                 <svg
                   width={connectorSvgWidth}
                   height={connectorSvgHeight}
-                  style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 3, overflow: "visible" }}
+                  style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 0, overflow: "visible" }}
                 >
                   <defs>
                     <marker id="pcal-dep-arrow" markerWidth="6" markerHeight="6" refX="4.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
