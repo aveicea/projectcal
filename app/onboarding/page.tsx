@@ -1037,7 +1037,7 @@ function OnboardingPageInner() {
                           style={{ marginBottom: 0, fontSize: 13 }} />
                       )}
                       <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
-                        선행 작업 → 후속 작업이 선으로 연결되고, 연결된 항목은 같은 줄에 붙여 배치됩니다
+                        비워두면 노션의 &quot;선행 작업&quot; 관계형을 자동 인식합니다. 선행 → 후속이 선으로 연결되고, 연결된 항목은 같은 줄에 붙여 배치됩니다
                       </div>
                     </div>
                   );

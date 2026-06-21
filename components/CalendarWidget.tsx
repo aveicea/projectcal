@@ -1257,8 +1257,8 @@ export default function CalendarWidget({
                         d={d}
                         fill="none"
                         stroke={primaryColor}
-                        strokeWidth={1.5}
-                        strokeOpacity={0.6}
+                        strokeWidth={1.75}
+                        strokeOpacity={0.85}
                         markerEnd="url(#pcal-dep-arrow)"
                       />
                     );
