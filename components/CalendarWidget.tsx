@@ -914,7 +914,7 @@ export default function CalendarWidget({
         outline: darkMode ? "none" : `2px solid ${headerBg}`,
         boxShadow: darkMode ? "none" : `2px 2px 0px ${primaryColor}4D, 4px 4px 12px ${primaryColor}26`,
         borderRadius: 10, overflow: "hidden", userSelect: "none",
-        width: "fit-content", maxWidth: "98vw",
+        width: "fit-content", maxWidth: "100%",
         display: "flex", flexDirection: "column", position: "relative",
       }}>
         {/* Header */}
