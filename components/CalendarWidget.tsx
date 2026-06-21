@@ -1249,12 +1249,9 @@ export default function CalendarWidget({
                 <svg
                   width={connectorSvgWidth}
                   height={connectorSvgHeight}
-                  style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 0, overflow: "visible" }}
+                  style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 3, overflow: "visible" }}
                 >
                   <defs>
-                    <marker id="pcal-dep-arrow" markerWidth="6" markerHeight="6" refX="4.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
-                      <path d="M0,0 L5,3 L0,6 Z" fill={primaryColor} />
-                    </marker>
                     {/* Mask: white = line visible, black bars = line hidden where it overlaps a bar */}
                     <mask id="pcal-dep-mask" maskUnits="userSpaceOnUse" x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight}>
                       <rect x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight} fill="white" />
@@ -1263,6 +1260,7 @@ export default function CalendarWidget({
                       ))}
                     </mask>
                   </defs>
+                  {/* Lines: masked so they never show through the translucent bars */}
                   <g mask="url(#pcal-dep-mask)">
                     {dependencyConnectors.map((c) => {
                       const dx = Math.max(10, Math.abs(c.x2 - c.x1) / 2);
@@ -1277,10 +1275,19 @@ export default function CalendarWidget({
                           stroke={primaryColor}
                           strokeWidth={1.75}
                           strokeOpacity={0.85}
-                          markerEnd="url(#pcal-dep-arrow)"
                         />
                       );
                     })}
+                  </g>
+                  {/* Arrowheads: NOT masked → always visible at the connection point */}
+                  <g>
+                    {dependencyConnectors.map((c) => (
+                      <path
+                        key={`${c.id}__arrow`}
+                        d={`M ${c.x2 - 5} ${c.y2 - 3.2} L ${c.x2} ${c.y2} L ${c.x2 - 5} ${c.y2 + 3.2} Z`}
+                        fill={primaryColor}
+                      />
+                    ))}
                   </g>
                 </svg>
               )}
