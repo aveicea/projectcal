@@ -833,6 +833,8 @@ export default function CalendarWidget({
   const GRID_PAD = 12;
   const HEADER_OFFSET = 40; // date header height (34) + marginBottom (6)
   const dependencyConnectors: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; sameRow: boolean }> = [];
+  // Bars to mask out so connector lines never show through the (translucent) bars.
+  const barMaskRects: Array<{ id: string; x: number; y: number; w: number; h: number }> = [];
   if (hasDeps && displayDays.length > 0) {
     const dateIndex = new Map<string, number>();
     displayDays.forEach((d, i) => dateIndex.set(d.dateStr, i));
@@ -855,6 +857,14 @@ export default function CalendarWidget({
         const x1 = GRID_PAD + (idxFor(pred.endDate) + 1) * dayWidth;
         const y1 = HEADER_OFFSET + pRow * ROW_HEIGHT + BAR_HEIGHT / 2;
         dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow });
+      }
+    }
+    if (dependencyConnectors.length > 0) {
+      for (const p of allDisplayProjects) {
+        const row = effectiveRowMap.get(p.id) ?? 0;
+        const x = GRID_PAD + idxFor(p.startDate) * dayWidth;
+        const xEnd = GRID_PAD + (idxFor(p.endDate) + 1) * dayWidth;
+        barMaskRects.push({ id: p.id, x, y: HEADER_OFFSET + row * ROW_HEIGHT, w: xEnd - x, h: BAR_HEIGHT });
       }
     }
   }
@@ -1245,24 +1255,33 @@ export default function CalendarWidget({
                     <marker id="pcal-dep-arrow" markerWidth="6" markerHeight="6" refX="4.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
                       <path d="M0,0 L5,3 L0,6 Z" fill={primaryColor} />
                     </marker>
+                    {/* Mask: white = line visible, black bars = line hidden where it overlaps a bar */}
+                    <mask id="pcal-dep-mask" maskUnits="userSpaceOnUse" x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight}>
+                      <rect x={0} y={0} width={connectorSvgWidth} height={connectorSvgHeight} fill="white" />
+                      {barMaskRects.map((r) => (
+                        <rect key={r.id} x={r.x} y={r.y} width={r.w} height={r.h} rx={4} fill="black" />
+                      ))}
+                    </mask>
                   </defs>
-                  {dependencyConnectors.map((c) => {
-                    const dx = Math.max(10, Math.abs(c.x2 - c.x1) / 2);
-                    const d = c.sameRow
-                      ? `M ${c.x1} ${c.y1} L ${c.x2} ${c.y2}`
-                      : `M ${c.x1} ${c.y1} C ${c.x1 + dx} ${c.y1}, ${c.x2 - dx} ${c.y2}, ${c.x2} ${c.y2}`;
-                    return (
-                      <path
-                        key={c.id}
-                        d={d}
-                        fill="none"
-                        stroke={primaryColor}
-                        strokeWidth={1.75}
-                        strokeOpacity={0.85}
-                        markerEnd="url(#pcal-dep-arrow)"
-                      />
-                    );
-                  })}
+                  <g mask="url(#pcal-dep-mask)">
+                    {dependencyConnectors.map((c) => {
+                      const dx = Math.max(10, Math.abs(c.x2 - c.x1) / 2);
+                      const d = c.sameRow
+                        ? `M ${c.x1} ${c.y1} L ${c.x2} ${c.y2}`
+                        : `M ${c.x1} ${c.y1} C ${c.x1 + dx} ${c.y1}, ${c.x2 - dx} ${c.y2}, ${c.x2} ${c.y2}`;
+                      return (
+                        <path
+                          key={c.id}
+                          d={d}
+                          fill="none"
+                          stroke={primaryColor}
+                          strokeWidth={1.75}
+                          strokeOpacity={0.85}
+                          markerEnd="url(#pcal-dep-arrow)"
+                        />
+                      );
+                    })}
+                  </g>
                 </svg>
               )}
               {displayDays.map((day) => {
