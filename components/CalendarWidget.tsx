@@ -166,6 +166,8 @@ export default function CalendarWidget({
     curRow: number;
   } | null>(null);
   const lastDragEnd = useRef(0);
+  // 단일 클릭(그룹 팝업) vs 더블 클릭(제목 편집) 구분용 지연 타이머
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [linkTargetId, setLinkTargetId] = useState<string | null>(null);
   const [detectedDependsProp, setDetectedDependsProp] = useState<string>("");
 
@@ -1050,6 +1052,22 @@ export default function CalendarWidget({
     }
   };
 
+  // 강조(중요) 체크박스 토글 → 노션 저장
+  const toggleHighlight = (pageId: string, next: boolean) => {
+    if (configId === "preview" || !config) return;
+    const prop = config.notionConfig.highlightProperty;
+    if (!prop) return;
+    setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, highlighted: next } : p));
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: config.notionConfig.apiKey, pageId, property: prop, value: next, propType: "checkbox" }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, highlighted: !next } : p)); })
+      .catch(() => setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, highlighted: !next } : p)));
+  };
+
   // 포인터 위치 → 날짜/행/일정/헤더 (마우스+터치 공통)
   const locateAt = (x: number, y: number) => {
     const els = (typeof document !== "undefined" ? document.elementsFromPoint(x, y) : []) as HTMLElement[];
@@ -1702,6 +1720,7 @@ export default function CalendarWidget({
                             }}
                             onPointerDown={(e) => { if (!isUpdating) startPointerDrag(e, "move", seg, dateStr); }}
                             onDoubleClick={(e) => {
+                              if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
                               if (seg.isStart) {
                                 e.stopPropagation();
                                 setEditingTitle({ id: seg.id, value: seg.title });
@@ -1709,9 +1728,17 @@ export default function CalendarWidget({
                             }}
                             onClick={(e) => {
                               if (Date.now() - lastDragEnd.current < 300) return;
-                              if (!seg.isGCal && config?.notionConfig.groupProperty && groupOptions.length > 0 && seg.isStart) {
+                              // 더블클릭이면 팝업을 열지 않도록 지연 후 실행 (dblclick에서 취소)
+                              const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
+                              const hasHighlight = !!config?.notionConfig.highlightProperty;
+                              if (!seg.isGCal && seg.isStart && (hasGroup || hasHighlight)) {
                                 e.stopPropagation();
-                                setEventPopup({ id: seg.id, group: seg.group ?? "", x: e.clientX, y: e.clientY });
+                                const cx = e.clientX, cy = e.clientY;
+                                if (clickTimer.current) clearTimeout(clickTimer.current);
+                                clickTimer.current = setTimeout(() => {
+                                  clickTimer.current = null;
+                                  setEventPopup({ id: seg.id, group: seg.group ?? "", x: cx, y: cy });
+                                }, 250);
                               }
                             }}
                             onMouseEnter={(e) => {
@@ -2009,6 +2036,34 @@ export default function CalendarWidget({
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* 강조(중요) 체크 — 맨 위, 노션에 저장 */}
+            {config?.notionConfig.highlightProperty && (() => {
+              const cur = projects.find((p) => p.id === eventPopup.id);
+              const on = !!cur?.highlighted;
+              const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
+              return (
+                <div
+                  onClick={() => toggleHighlight(eventPopup.id, !on)}
+                  style={{
+                    padding: "6px 10px", fontSize: 11, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8,
+                    borderBottom: groupOptions.length > 0 ? "1px solid #eee" : "none",
+                    fontWeight: 600, color: "#444",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                >
+                  <div style={{
+                    width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                    border: `1.5px solid ${on ? hl : "#ccc"}`, background: on ? hl : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  ⭐ 강조
+                </div>
+              );
+            })()}
             {groupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
               return (
