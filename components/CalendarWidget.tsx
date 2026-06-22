@@ -838,6 +838,8 @@ export default function CalendarWidget({
   // Dependency-aware layout when any event has predecessors ("선행 작업"),
   // otherwise keep the original packing behavior unchanged.
   const hasDeps = allDisplayProjects.some((p) => p.dependsOn && p.dependsOn.length > 0);
+  // 선행으로 참조되는 일정 ID 집합 (오른쪽 ✕ 표시 여부 판단용)
+  const referencedPredIds = new Set(allDisplayProjects.flatMap((p) => p.dependsOn ?? []));
   const rowMap = hasDeps
     ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
     : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
@@ -884,8 +886,8 @@ export default function CalendarWidget({
         const pRow = effectiveRowMap.get(pred.id) ?? 0;
         const x1 = GRID_PAD + (idxFor(pred.endDate) + 1) * dayWidth;
         const y1 = HEADER_OFFSET + pRow * ROW_HEIGHT + BAR_HEIGHT / 2;
-        // 선행 작업이 후속보다 늦게 끝나면(겹치거나 역전) 화살표가 거꾸로 간다
-        const backward = pred.endDate >= succ.startDate;
+        // 선행이 후속보다 늦게 끝나면(역전) 화살표를 빨강으로. 같은 날은 제외.
+        const backward = pred.endDate > succ.startDate;
         dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow, backward });
       }
     }
@@ -1010,6 +1012,42 @@ export default function CalendarWidget({
       .then((r) => r.json())
       .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === succId ? { ...p, dependsOn: existing } : p)); })
       .catch(() => setProjects((ps) => ps.map((p) => p.id === succId ? { ...p, dependsOn: existing } : p)));
+  };
+
+  // 한 일정의 선후 연결을 끊는다 (노션에 저장)
+  const writeDependsOn = (pageId: string, next: string[], prevOnFail: string[]) => {
+    if (!config) return;
+    const prop = config.notionConfig.dependencyProperty || detectedDependsProp;
+    if (!prop) return;
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: config.notionConfig.apiKey, pageId, property: prop, value: next, propType: "relation" }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, dependsOn: prevOnFail } : p)); })
+      .catch(() => setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, dependsOn: prevOnFail } : p)));
+  };
+
+  // 왼쪽 ✕: 이 일정의 선행 작업(들)을 모두 제거
+  const clearIncoming = (seg: AnySegment) => {
+    if (configId === "preview" || !config) return;
+    const prev = seg.dependsOn ?? [];
+    if (prev.length === 0) return;
+    setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, dependsOn: [] } : p));
+    writeDependsOn(seg.id, [], prev);
+  };
+
+  // 오른쪽 ✕: 이 일정을 선행으로 두는 후속들에서 연결 제거
+  const clearOutgoing = (seg: AnySegment) => {
+    if (configId === "preview" || !config) return;
+    const successors = allDisplayProjects.filter((p) => !p.isGCal && (p.dependsOn ?? []).includes(seg.id));
+    for (const succ of successors) {
+      const prev = succ.dependsOn ?? [];
+      const next = prev.filter((x) => x !== seg.id);
+      setProjects((ps) => ps.map((p) => p.id === succ.id ? { ...p, dependsOn: next } : p));
+      writeDependsOn(succ.id, next, prev);
+    }
   };
 
   // 포인터 위치 → 날짜/행/일정/헤더 (마우스+터치 공통)
@@ -1720,35 +1758,52 @@ export default function CalendarWidget({
                               />
                             )}
 
-                            {/* Dependency link handles (호버 시 앞뒤 동그라미 → 드래그로 선후관계 생성) */}
-                            {isHovered && !seg.isGCal && configId !== "preview" && !isDragging && (
-                              <>
-                                {seg.isStart && (
-                                  <div
-                                    title="선행 작업 연결"
-                                    onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                    style={{
-                                      position: "absolute", left: -5, top: "50%", transform: "translateY(-50%)",
-                                      width: 9, height: 9, borderRadius: "50%", zIndex: 30, touchAction: "none",
-                                      background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair",
-                                      boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-                                    }}
-                                  />
-                                )}
-                                {seg.isEnd && (
-                                  <div
-                                    title="후속 작업 연결"
-                                    onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                    style={{
-                                      position: "absolute", right: -5, top: "50%", transform: "translateY(-50%)",
-                                      width: 9, height: 9, borderRadius: "50%", zIndex: 30, touchAction: "none",
-                                      background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair",
-                                      boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-                                    }}
-                                  />
-                                )}
-                              </>
-                            )}
+                            {/* Dependency link handles
+                                - 연결 없음: 동그라미(드래그로 선후관계 생성)
+                                - 이미 연결됨: ✕(클릭/탭으로 연결 삭제, 노션 저장) */}
+                            {isHovered && !seg.isGCal && configId !== "preview" && !isDragging && (() => {
+                              const hasIncoming = (seg.dependsOn?.length ?? 0) > 0;
+                              const hasOutgoing = referencedPredIds.has(seg.id);
+                              const circle: React.CSSProperties = {
+                                position: "absolute", top: "50%", transform: "translateY(-50%)",
+                                width: 12, height: 12, borderRadius: "50%", zIndex: 30, touchAction: "none",
+                                boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                              };
+                              return (
+                                <>
+                                  {seg.isStart && (hasIncoming ? (
+                                    <div
+                                      title="선행 작업 연결 삭제"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
+                                      style={{ ...circle, left: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                    >×</div>
+                                  ) : (
+                                    <div
+                                      title="선행 작업 연결"
+                                      onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
+                                      style={{ ...circle, left: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                    />
+                                  ))}
+                                  {seg.isEnd && (hasOutgoing ? (
+                                    <div
+                                      title="후속 작업 연결 삭제"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
+                                      style={{ ...circle, right: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                    >×</div>
+                                  ) : (
+                                    <div
+                                      title="후속 작업 연결"
+                                      onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
+                                      style={{ ...circle, right: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                    />
+                                  ))}
+                                </>
+                              );
+                            })()}
 
                             {/* Label / inline title editor */}
                             {editingTitle?.id === seg.id ? (() => {
