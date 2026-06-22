@@ -8,6 +8,10 @@ export interface Project {
   group?: string;
   // Notion 관계형 의존성: 이 작업의 "선행 작업"(predecessor) 페이지 ID 목록
   dependsOn?: string[];
+  // 강조(체크박스) 속성 — 체크 시 테두리 표시
+  highlighted?: boolean;
+  // 행 위치(선택) 속성에 저장된 줄 위치
+  rowPos?: number;
 }
 
 export interface ProjectSegment extends Project {
