@@ -45,6 +45,18 @@ export async function POST(req: NextRequest) {
       .filter(([, p]) => p.type === "select" || p.type === "rich_text")
       .map(([name, p]) => ({ name, type: p.type }));
 
+    // 이름으로 선행/강조/행 위치 속성 자동 매칭 (온보딩 기본값 추천)
+    const pickByKeywords = (names: string[], keywords: string[]) =>
+      names.find((n) => keywords.some((k) => n.toLowerCase().includes(k))) ?? "";
+    const relationNames = Object.entries(props).filter(([, p]) => p.type === "relation").map(([n]) => n);
+    const suggestedDependency =
+      pickByKeywords(relationNames, ["선행", "종속", "이전", "blocked by", "blocked_by", "blocked", "depends", "dependency", "dependencies", "predecessor"]) ||
+      (relationNames.length === 1 ? relationNames[0] : "");
+    const suggestedHighlight =
+      pickByKeywords(checkboxProperties, ["강조", "중요", "핵심", "중점", "별", "important", "highlight", "star", "priority", "flag", "key"]) ||
+      (checkboxProperties.length === 1 ? checkboxProperties[0] : "");
+    const suggestedRow = pickByKeywords(rowProperties.map((p) => p.name), ["행", "위치", "순서", "줄", "칸", "row", "order", "line", "position", "rank"]);
+
     const selectOptions: Record<string, string[]> = {};
     for (const [name, prop] of Object.entries(props)) {
       const tp = prop as Record<string, unknown>;
@@ -207,7 +219,7 @@ export async function POST(req: NextRequest) {
       } catch { /* silent — don't fail the whole request */ }
     }
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, checkboxProperties, rowProperties, selectOptions, relationOptionIds, rollupRelationProps } });
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, checkboxProperties, rowProperties, suggestedDependency, suggestedHighlight, suggestedRow, selectOptions, relationOptionIds, rollupRelationProps } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });

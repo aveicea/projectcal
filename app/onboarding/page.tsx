@@ -311,11 +311,18 @@ function OnboardingPageInner() {
       .then((json) => {
         if (json.success && json.data) {
           setGroupableProperties(json.data.groupableProperties ?? []);
-        setCheckboxProperties(json.data.checkboxProperties ?? []);
-        setRowProperties(json.data.rowProperties ?? []);
+          setCheckboxProperties(json.data.checkboxProperties ?? []);
+          setRowProperties(json.data.rowProperties ?? []);
           setDateProperties(json.data.dateProperties ?? []);
           setTitleProperties(json.data.titleProperties ?? []);
           setSelectOptions(json.data.selectOptions ?? {});
+          // 비어 있을 때만 자동 매칭값 채우기 (저장된 명시 선택은 보존)
+          setSettings((prev) => ({
+            ...prev,
+            dependencyProperty: prev.dependencyProperty || (json.data.suggestedDependency ?? ""),
+            highlightProperty: prev.highlightProperty || (json.data.suggestedHighlight ?? ""),
+            rowProperty: prev.rowProperty || (json.data.suggestedRow ?? ""),
+          }));
         }
       })
       .catch(() => {});
@@ -387,7 +394,9 @@ function OnboardingPageInner() {
           dateProperty: json.data.dateProperty || prev.dateProperty,
           titleProperty: json.data.titleProperty || prev.titleProperty,
           groupProperty: "",
-          dependencyProperty: "",
+          dependencyProperty: json.data.suggestedDependency ?? "",
+          highlightProperty: json.data.suggestedHighlight ?? "",
+          rowProperty: json.data.suggestedRow ?? "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
         setCheckboxProperties(json.data.checkboxProperties ?? []);
