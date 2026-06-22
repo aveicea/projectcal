@@ -149,8 +149,25 @@ export default function CalendarWidget({
   const [editingTitle, setEditingTitle] = useState<{ id: string; value: string } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
-  const dragGrabDate = useRef<string | null>(null);
-  const dragMode = useRef<"move" | "resize-start" | "resize-end" | null>(null);
+  // Pointer-based drag (works on mouse + touch). Replaces native HTML5 DnD.
+  const pdrag = useRef<{
+    mode: "move" | "resize-start" | "resize-end" | "link";
+    segId: string;
+    isGCal: boolean;
+    grabDate: string;
+    originStart: string;
+    originEnd: string;
+    fromEnd: boolean;
+    startX: number;
+    startY: number;
+    active: boolean;
+    curStart: string;
+    curEnd: string;
+    curRow: number;
+  } | null>(null);
+  const lastDragEnd = useRef(0);
+  const [linkTargetId, setLinkTargetId] = useState<string | null>(null);
+  const [detectedDependsProp, setDetectedDependsProp] = useState<string>("");
 
   // ── GCal state ────────────────────────────────────────────────────────────
   const [gcalToken, setGcalToken] = useState<string | null>(null);
@@ -754,6 +771,7 @@ export default function CalendarWidget({
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
         setProjects(json.success && json.data ? applyGroupColors(assignColors(json.data, barColors)) : []);
+        if (json.dependsProp) setDetectedDependsProp(json.dependsProp as string);
       } catch (e) {
         console.error(e);
         setError("프로젝트를 불러올 수 없습니다.");
@@ -820,6 +838,8 @@ export default function CalendarWidget({
   // Dependency-aware layout when any event has predecessors ("선행 작업"),
   // otherwise keep the original packing behavior unchanged.
   const hasDeps = allDisplayProjects.some((p) => p.dependsOn && p.dependsOn.length > 0);
+  // 선행으로 참조되는 일정 ID 집합 (오른쪽 ✕ 표시 여부 판단용)
+  const referencedPredIds = new Set(allDisplayProjects.flatMap((p) => p.dependsOn ?? []));
   const rowMap = hasDeps
     ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
     : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
@@ -866,8 +886,8 @@ export default function CalendarWidget({
         const pRow = effectiveRowMap.get(pred.id) ?? 0;
         const x1 = GRID_PAD + (idxFor(pred.endDate) + 1) * dayWidth;
         const y1 = HEADER_OFFSET + pRow * ROW_HEIGHT + BAR_HEIGHT / 2;
-        // 선행 작업이 후속보다 늦게 끝나면(겹치거나 역전) 화살표가 거꾸로 간다
-        const backward = pred.endDate >= succ.startDate;
+        // 선행이 후속보다 늦게 끝나면(역전) 화살표를 빨강으로. 같은 날은 제외.
+        const backward = pred.endDate > succ.startDate;
         dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow, backward });
       }
     }
@@ -944,6 +964,202 @@ export default function CalendarWidget({
         propType: "select",
       }),
     }).catch(() => { /* ignore */ });
+  };
+
+  // 일정 삭제 (헤더로 드롭)
+  const deleteEvent = (proj: AnySegment) => {
+    if (proj.isGCal) {
+      if (gcalToken && proj.gcalEventId) {
+        setGcalProjects((prev) => prev.filter((p) => p.id !== proj.id));
+        fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(proj.gcalEventId)}&calendarId=${encodeURIComponent(proj.gcalCalendarId || "primary")}`)
+          .then((r) => { if (!r.ok) setGcalProjects((prev) => [...prev, proj]); })
+          .catch(() => setGcalProjects((prev) => [...prev, proj]));
+      }
+    } else {
+      setProjects((prev) => prev.filter((p) => p.id !== proj.id));
+      fetch("/api/delete-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: config?.notionConfig.apiKey, pageId: proj.id }),
+      })
+        .then((r) => r.json())
+        .then((d) => { if (!d.success) setProjects((prev) => [...prev, proj as ProjectSegment]); })
+        .catch(() => setProjects((prev) => [...prev, proj as ProjectSegment]));
+    }
+  };
+
+  // 선후관계(의존성) 생성: 동그라미에서 다른 일정으로 드래그
+  // fromEnd=true → source가 선행(predecessor), target이 후속
+  // fromEnd=false → source가 후속, target이 선행
+  const createDependency = (sourceId: string, targetId: string, fromEnd: boolean) => {
+    if (configId === "preview" || !config) return;
+    const prop = config.notionConfig.dependencyProperty || detectedDependsProp;
+    if (!prop) return;
+    const succId = fromEnd ? targetId : sourceId;
+    const predId = fromEnd ? sourceId : targetId;
+    if (succId === predId) return;
+    const succ = projects.find((p) => p.id === succId);
+    if (!succ) return; // 후속이 노션 일정이어야 함
+    const existing = succ.dependsOn ?? [];
+    if (existing.includes(predId)) return;
+    const next = [...existing, predId];
+    setProjects((ps) => ps.map((p) => p.id === succId ? { ...p, dependsOn: next } : p));
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: config.notionConfig.apiKey, pageId: succId, property: prop, value: next, propType: "relation" }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === succId ? { ...p, dependsOn: existing } : p)); })
+      .catch(() => setProjects((ps) => ps.map((p) => p.id === succId ? { ...p, dependsOn: existing } : p)));
+  };
+
+  // 한 일정의 선후 연결을 끊는다 (노션에 저장)
+  const writeDependsOn = (pageId: string, next: string[], prevOnFail: string[]) => {
+    if (!config) return;
+    const prop = config.notionConfig.dependencyProperty || detectedDependsProp;
+    if (!prop) return;
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: config.notionConfig.apiKey, pageId, property: prop, value: next, propType: "relation" }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!d.success) setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, dependsOn: prevOnFail } : p)); })
+      .catch(() => setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, dependsOn: prevOnFail } : p)));
+  };
+
+  // 왼쪽 ✕: 이 일정의 선행 작업(들)을 모두 제거
+  const clearIncoming = (seg: AnySegment) => {
+    if (configId === "preview" || !config) return;
+    const prev = seg.dependsOn ?? [];
+    if (prev.length === 0) return;
+    setProjects((ps) => ps.map((p) => p.id === seg.id ? { ...p, dependsOn: [] } : p));
+    writeDependsOn(seg.id, [], prev);
+  };
+
+  // 오른쪽 ✕: 이 일정을 선행으로 두는 후속들에서 연결 제거
+  const clearOutgoing = (seg: AnySegment) => {
+    if (configId === "preview" || !config) return;
+    const successors = allDisplayProjects.filter((p) => !p.isGCal && (p.dependsOn ?? []).includes(seg.id));
+    for (const succ of successors) {
+      const prev = succ.dependsOn ?? [];
+      const next = prev.filter((x) => x !== seg.id);
+      setProjects((ps) => ps.map((p) => p.id === succ.id ? { ...p, dependsOn: next } : p));
+      writeDependsOn(succ.id, next, prev);
+    }
+  };
+
+  // 포인터 위치 → 날짜/행/일정/헤더 (마우스+터치 공통)
+  const locateAt = (x: number, y: number) => {
+    const els = (typeof document !== "undefined" ? document.elementsFromPoint(x, y) : []) as HTMLElement[];
+    let date: string | null = null, dropEl: HTMLElement | null = null, segId: string | null = null, header = false;
+    for (const el of els) {
+      const ds = el.dataset;
+      if (!ds) continue;
+      if (!date && ds.pcalDate) { date = ds.pcalDate; dropEl = el; }
+      if (!segId && ds.pcalSeg) segId = ds.pcalSeg;
+      if (ds.pcalHeader) header = true;
+    }
+    let row = 0;
+    if (dropEl) { const r = dropEl.getBoundingClientRect(); row = Math.max(0, Math.floor((y - r.top) / ROW_HEIGHT)); }
+    return { date, row, segId, header };
+  };
+
+  // 포인터 기반 드래그 시작 (이동/리사이즈/링크) — 마우스와 터치 모두 동작
+  const startPointerDrag = (
+    e: React.PointerEvent,
+    mode: "move" | "resize-start" | "resize-end" | "link",
+    seg: AnySegment,
+    dateStr: string,
+    fromEnd = false,
+  ) => {
+    if (gcalUpdatingId === seg.id) return;
+    e.stopPropagation();
+    setHoveredId(seg.id); // 터치에서 핸들/동그라미 노출
+    pdrag.current = {
+      mode, segId: seg.id, isGCal: !!seg.isGCal, grabDate: dateStr,
+      originStart: seg.startDate, originEnd: seg.endDate, fromEnd,
+      startX: e.clientX, startY: e.clientY, active: false,
+      curStart: seg.startDate, curEnd: seg.endDate, curRow: effectiveRowMap.get(seg.id) ?? 0,
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const d = pdrag.current;
+      if (!d) return;
+      if (!d.active) {
+        if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < 5) return;
+        d.active = true;
+        setDragId(d.segId);
+        setTooltip((t) => ({ ...t, visible: false }));
+      }
+      ev.preventDefault();
+      const loc = locateAt(ev.clientX, ev.clientY);
+      if (d.mode === "link") {
+        setLinkTargetId(loc.segId && loc.segId !== d.segId ? loc.segId : null);
+        return;
+      }
+      setDropOnHeader(loc.header);
+      if (loc.header) { setDropDateStr(null); return; }
+      if (!loc.date) return;
+      setDropDateStr(loc.date);
+      if (d.mode === "move") {
+        const delta = daysBetween(d.grabDate, loc.date);
+        const ns = addDays(d.originStart, delta), ne = addDays(d.originEnd, delta);
+        d.curStart = ns; d.curEnd = ne; d.curRow = loc.row;
+        setDateOverrides((prev) => { const n = new Map(prev); n.set(d.segId, { startDate: ns, endDate: ne }); return n; });
+      } else if (d.mode === "resize-end") {
+        const ne = loc.date >= d.originStart ? loc.date : d.originStart;
+        d.curStart = d.originStart; d.curEnd = ne;
+        setDateOverrides((prev) => { const n = new Map(prev); n.set(d.segId, { startDate: d.originStart, endDate: ne }); return n; });
+      } else if (d.mode === "resize-start") {
+        const ns = loc.date <= d.originEnd ? loc.date : d.originEnd;
+        d.curStart = ns; d.curEnd = d.originEnd;
+        setDateOverrides((prev) => { const n = new Map(prev); n.set(d.segId, { startDate: ns, endDate: d.originEnd }); return n; });
+      }
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      const d = pdrag.current;
+      pdrag.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (!d) return;
+      if (!d.active) return; // 단순 탭/클릭 → 클릭 핸들러에 맡김
+      lastDragEnd.current = Date.now();
+      const loc = locateAt(ev.clientX, ev.clientY);
+      const proj = allDisplayProjects.find((p) => p.id === d.segId);
+      if (d.mode === "link") {
+        if (loc.segId && loc.segId !== d.segId) createDependency(d.segId, loc.segId, d.fromEnd);
+      } else if (proj) {
+        if (loc.header) {
+          deleteEvent(proj);
+        } else if (d.mode === "move") {
+          if (d.curStart !== d.originStart) {
+            if (proj.isGCal) updateGCalEvent(proj, d.curStart, d.curEnd);
+            else persistNotionDate(d.segId, d.curStart, d.curEnd);
+          }
+          setRowOverrides((prev) => {
+            const next = bumpRows(d.segId, d.curRow, prev);
+            const obj: Record<string, number> = {};
+            next.forEach((v, k) => { obj[k] = v; });
+            safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
+            return next;
+          });
+          if (!proj.isGCal) persistNotionRow(d.segId, d.curRow);
+        } else {
+          // resize
+          if (proj.isGCal) updateGCalEvent(proj, d.curStart, d.curEnd);
+          else persistNotionDate(d.segId, d.curStart, d.curEnd);
+        }
+      }
+      setDragId(null); setDropDateStr(null); setDropOnHeader(false); setLinkTargetId(null);
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
 
   function getSegmentsForDay(dateStr: string): AnySegment[] {
@@ -1352,41 +1568,11 @@ export default function CalendarWidget({
                     display: "flex", flexDirection: "column", alignItems: "center",
                     width: dayWidth, flexShrink: 0,
                   }}>
-                    {/* Date header — drop here to delete */}
+                    {/* Date header — drag an event here to delete */}
                     <div
+                      data-pcal-header="1"
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
                       onClick={scrollToToday}
-                      onDragOver={(e) => { if (dragId) { e.preventDefault(); setDropOnHeader(true); } }}
-                      onDragLeave={() => setDropOnHeader(false)}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        setDropOnHeader(false);
-                        const sourceId = e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain") || dragId || "";
-                        if (!sourceId) return;
-                        const proj = allDisplayProjects.find((p) => p.id === sourceId);
-                        if (!proj) return;
-                        setDragId(null);
-                        if (proj.isGCal) {
-                          if (gcalToken && proj.gcalEventId) {
-                            // Optimistic remove
-                            setGcalProjects((prev) => prev.filter((p) => p.id !== sourceId));
-                            fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(proj.gcalEventId)}&calendarId=${encodeURIComponent(proj.gcalCalendarId || "primary")}`)
-                              .then((r) => { if (!r.ok) setGcalProjects((prev) => [...prev, proj as AnySegment]); })
-                              .catch(() => setGcalProjects((prev) => [...prev, proj as AnySegment]));
-                          }
-                        } else {
-                          // Optimistic remove
-                          setProjects((prev) => prev.filter((p) => p.id !== sourceId));
-                          fetch("/api/delete-event", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ apiKey: config?.notionConfig.apiKey, pageId: sourceId }),
-                          })
-                            .then((r) => r.json())
-                            .then((d) => { if (!d.success) setProjects((prev) => [...prev, proj as ProjectSegment]); })
-                            .catch(() => setProjects((prev) => [...prev, proj as ProjectSegment]));
-                        }
-                      }}
                     >
                       {isMonthBoundary ? (
                         <span style={{
@@ -1422,6 +1608,7 @@ export default function CalendarWidget({
 
                     {/* Drop zone */}
                     <div
+                      data-pcal-date={dateStr}
                       style={{
                         height: `${Math.max(totalRows, (createInput?.dateStr === dateStr ? createInput.row + 1 : 0)) * ROW_HEIGHT}px`, width: "100%", position: "relative",
                         background: isColDrop ? hexToRgba(primaryColor, 0.12) : "transparent",
@@ -1434,81 +1621,6 @@ export default function CalendarWidget({
                           const row = Math.max(0, Math.floor((e.clientY - rect.top) / ROW_HEIGHT));
                           setCreateInput({ dateStr, title: "", row });
                         }
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        setDropDateStr(dateStr);
-                      }}
-                      onDragLeave={() => setDropDateStr(null)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const sourceId = e.dataTransfer.getData("application/x-project-id") || e.dataTransfer.getData("text/plain") || dragId || "";
-                        if (!sourceId) { setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null; return; }
-
-                        const mode = dragMode.current;
-                        const project = allDisplayProjects.find((p) => p.id === sourceId);
-
-                        if (project?.isGCal) {
-                          // GCal event drag → update in Google Calendar
-                          if (mode === "move" && dragGrabDate.current) {
-                            const zoneRect = e.currentTarget.getBoundingClientRect();
-                            const dropRow = Math.max(0, Math.floor((e.clientY - zoneRect.top) / ROW_HEIGHT));
-                            const delta = daysBetween(dragGrabDate.current, dateStr);
-                            if (delta !== 0) {
-                              const newStart = addDays(project.startDate, delta);
-                              const newEnd = addDays(project.endDate, delta);
-                              setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: newEnd }); return next; });
-                              updateGCalEvent(project, newStart, newEnd);
-                            }
-                            setRowOverrides((prev) => {
-                              const next = bumpRows(sourceId, dropRow, prev);
-                              const obj: Record<string, number> = {};
-                              next.forEach((v, k) => { obj[k] = v; });
-                              safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
-                              return next;
-                            });
-                          } else if (mode === "resize-end") {
-                            const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
-                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
-                            updateGCalEvent(project, project.startDate, newEnd);
-                          } else if (mode === "resize-start") {
-                            const newStart = dateStr <= project.endDate ? dateStr : project.endDate;
-                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: project.endDate }); return next; });
-                            updateGCalEvent(project, newStart, project.endDate);
-                          }
-                        } else if (project) {
-                          // Notion event drag → optimistic local update + persist to Notion
-                          if (mode === "move" && dragGrabDate.current) {
-                            // Compute target row from drop Y position
-                            const zoneRect = e.currentTarget.getBoundingClientRect();
-                            const dropRow = Math.max(0, Math.floor((e.clientY - zoneRect.top) / ROW_HEIGHT));
-                            const delta = daysBetween(dragGrabDate.current, dateStr);
-                            if (delta !== 0) {
-                              const newStart = addDays(project.startDate, delta);
-                              const newEnd = addDays(project.endDate, delta);
-                              setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: newEnd }); return next; });
-                              persistNotionDate(sourceId, newStart, newEnd);
-                            }
-                            setRowOverrides((prev) => {
-                              const next = bumpRows(sourceId, dropRow, prev);
-                              const obj: Record<string, number> = {};
-                              next.forEach((v, k) => { obj[k] = v; });
-                              safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
-                              return next;
-                            });
-                            persistNotionRow(sourceId, dropRow);
-                          } else if (mode === "resize-end") {
-                            const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
-                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
-                            persistNotionDate(sourceId, project.startDate, newEnd);
-                          } else if (mode === "resize-start") {
-                            const newStart = dateStr <= project.endDate ? dateStr : project.endDate;
-                            setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: project.endDate }); return next; });
-                            persistNotionDate(sourceId, newStart, project.endDate);
-                          }
-                        }
-                        setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null;
                       }}
                     >
                       {segments.map((seg) => {
@@ -1568,22 +1680,27 @@ export default function CalendarWidget({
                           ? gcalColor
                           : isHovered ? seg.color : hexToRgba(seg.color, 0.55);
 
+                        const isLinkTarget = linkTargetId === seg.id;
                         return (
                           <div
                             key={seg.id}
+                            data-pcal-seg={seg.id}
                             style={{
                               height: BAR_HEIGHT, display: "flex", alignItems: "center",
                               justifyContent: "center", position: "absolute", color: "white",
                               fontSize: 10, fontWeight: "bold", overflow: "visible",
                               transition: "background-color .2s",
                               cursor: isDragging ? "grabbing" : "grab",
-                              left: 0, zIndex: zIdx, backgroundColor: bgC,
+                              touchAction: "none",
+                              left: 0, zIndex: isLinkTarget ? 215 : zIdx, backgroundColor: bgC,
                               top: `${row * ROW_HEIGHT}px`,
                               ...shapeStyle,
                               ...(isDragging ? { opacity: 0.3 } : isUpdating ? { opacity: 0.6 } : { opacity: segOpacity }),
                               ...gcalOutlineStyle,
                               ...highlightOutlineStyle,
+                              ...(isLinkTarget ? { boxShadow: `0 0 0 2px ${primaryColor}` } : {}),
                             }}
+                            onPointerDown={(e) => { if (!isUpdating) startPointerDrag(e, "move", seg, dateStr); }}
                             onDoubleClick={(e) => {
                               if (seg.isStart) {
                                 e.stopPropagation();
@@ -1591,24 +1708,11 @@ export default function CalendarWidget({
                               }
                             }}
                             onClick={(e) => {
+                              if (Date.now() - lastDragEnd.current < 300) return;
                               if (!seg.isGCal && config?.notionConfig.groupProperty && groupOptions.length > 0 && seg.isStart) {
                                 e.stopPropagation();
                                 setEventPopup({ id: seg.id, group: seg.group ?? "", x: e.clientX, y: e.clientY });
                               }
-                            }}
-                            draggable={!isUpdating}
-                            onDragStart={(e) => {
-                              dragMode.current = "move";
-                              dragGrabDate.current = dateStr;
-                              setDragId(seg.id);
-                              setDropDateStr(null);
-                              e.dataTransfer.effectAllowed = "move";
-                              e.dataTransfer.setData("application/x-project-id", seg.id);
-                              e.dataTransfer.setData("text/plain", seg.id);
-                            }}
-                            onDragEnd={() => {
-                              setDragId(null); setDropDateStr(null);
-                              dragMode.current = null; dragGrabDate.current = null;
                             }}
                             onMouseEnter={(e) => {
                               setHoveredId(seg.id);
@@ -1631,58 +1735,75 @@ export default function CalendarWidget({
                             {/* Left resize handle */}
                             {seg.isStart && (
                               <div
-                                draggable
                                 style={{
-                                  position: "absolute", left: 0, top: 0, width: 7, height: "100%",
-                                  cursor: "ew-resize", zIndex: 20,
+                                  position: "absolute", left: 0, top: 0, width: 9, height: "100%",
+                                  cursor: "ew-resize", zIndex: 20, touchAction: "none",
                                   borderTopLeftRadius: 4, borderBottomLeftRadius: 4,
                                   background: "transparent",
                                 }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onDragStart={(e) => {
-                                  e.stopPropagation();
-                                  dragMode.current = "resize-start";
-                                  setDragId(seg.id);
-                                  setDropDateStr(null);
-                                  e.dataTransfer.effectAllowed = "move";
-                                  e.dataTransfer.setData("application/x-project-id", seg.id);
-                                  e.dataTransfer.setData("text/plain", seg.id);
-                                }}
-                                onDragEnd={(e) => {
-                                  e.stopPropagation();
-                                  setDragId(null); setDropDateStr(null);
-                                  dragMode.current = null;
-                                }}
+                                onPointerDown={(e) => startPointerDrag(e, "resize-start", seg, dateStr)}
                               />
                             )}
 
                             {/* Right resize handle */}
                             {seg.isEnd && (
                               <div
-                                draggable
                                 style={{
-                                  position: "absolute", right: 0, top: 0, width: 7, height: "100%",
-                                  cursor: "ew-resize", zIndex: 20,
+                                  position: "absolute", right: 0, top: 0, width: 9, height: "100%",
+                                  cursor: "ew-resize", zIndex: 20, touchAction: "none",
                                   borderTopRightRadius: 4, borderBottomRightRadius: 4,
                                   background: "transparent",
                                 }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onDragStart={(e) => {
-                                  e.stopPropagation();
-                                  dragMode.current = "resize-end";
-                                  setDragId(seg.id);
-                                  setDropDateStr(null);
-                                  e.dataTransfer.effectAllowed = "move";
-                                  e.dataTransfer.setData("application/x-project-id", seg.id);
-                                  e.dataTransfer.setData("text/plain", seg.id);
-                                }}
-                                onDragEnd={(e) => {
-                                  e.stopPropagation();
-                                  setDragId(null); setDropDateStr(null);
-                                  dragMode.current = null;
-                                }}
+                                onPointerDown={(e) => startPointerDrag(e, "resize-end", seg, dateStr)}
                               />
                             )}
+
+                            {/* Dependency link handles
+                                - 연결 없음: 동그라미(드래그로 선후관계 생성)
+                                - 이미 연결됨: ✕(클릭/탭으로 연결 삭제, 노션 저장) */}
+                            {isHovered && !seg.isGCal && configId !== "preview" && !isDragging && (() => {
+                              const hasIncoming = (seg.dependsOn?.length ?? 0) > 0;
+                              const hasOutgoing = referencedPredIds.has(seg.id);
+                              const circle: React.CSSProperties = {
+                                position: "absolute", top: "50%", transform: "translateY(-50%)",
+                                width: 12, height: 12, borderRadius: "50%", zIndex: 30, touchAction: "none",
+                                boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                              };
+                              return (
+                                <>
+                                  {seg.isStart && (hasIncoming ? (
+                                    <div
+                                      title="선행 작업 연결 삭제"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
+                                      style={{ ...circle, left: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                    >×</div>
+                                  ) : (
+                                    <div
+                                      title="선행 작업 연결"
+                                      onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
+                                      style={{ ...circle, left: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                    />
+                                  ))}
+                                  {seg.isEnd && (hasOutgoing ? (
+                                    <div
+                                      title="후속 작업 연결 삭제"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
+                                      style={{ ...circle, right: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                    >×</div>
+                                  ) : (
+                                    <div
+                                      title="후속 작업 연결"
+                                      onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
+                                      style={{ ...circle, right: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                    />
+                                  ))}
+                                </>
+                              );
+                            })()}
 
                             {/* Label / inline title editor */}
                             {editingTitle?.id === seg.id ? (() => {
