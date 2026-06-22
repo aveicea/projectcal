@@ -14,7 +14,8 @@ export async function POST(req: NextRequest) {
       | { status: { name: string } }
       | { rich_text: { text: { content: string } }[] }
       | { title: { text: { content: string } }[] }
-      | { relation: { id: string }[] };
+      | { relation: { id: string }[] }
+      | { date: { start: string; end: string | null } };
     let propValue: PropValue;
     if (propType === "multi_select") {
       propValue = { multi_select: [{ name: value }] };
@@ -25,7 +26,14 @@ export async function POST(req: NextRequest) {
     } else if (propType === "title") {
       propValue = { title: [{ text: { content: value } }] };
     } else if (propType === "relation") {
-      propValue = { relation: [{ id: value }] };
+      // value는 단일 ID 문자열 또는 ID 배열 모두 허용 (의존성 추가용)
+      const ids: string[] = Array.isArray(value) ? value : [value];
+      propValue = { relation: ids.filter(Boolean).map((id: string) => ({ id })) };
+    } else if (propType === "date") {
+      // value: { start, end? } — 하루짜리면 end는 null
+      const start = typeof value === "object" ? value.start : value;
+      const end = typeof value === "object" && value.end && value.end !== value.start ? value.end : null;
+      propValue = { date: { start, end } };
     } else {
       propValue = { select: { name: value } };
     }

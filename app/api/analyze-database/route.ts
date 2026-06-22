@@ -37,6 +37,14 @@ export async function POST(req: NextRequest) {
       .filter(([, p]) => groupableTypes.includes(p.type))
       .map(([name, p]) => ({ name, type: p.type }));
 
+    // 강조용 체크박스 속성, 행 위치용 선택 속성(또는 텍스트)
+    const checkboxProperties = Object.entries(props)
+      .filter(([, p]) => p.type === "checkbox")
+      .map(([name]) => name);
+    const rowProperties = Object.entries(props)
+      .filter(([, p]) => p.type === "select" || p.type === "rich_text")
+      .map(([name, p]) => ({ name, type: p.type }));
+
     const selectOptions: Record<string, string[]> = {};
     for (const [name, prop] of Object.entries(props)) {
       const tp = prop as Record<string, unknown>;
@@ -199,7 +207,7 @@ export async function POST(req: NextRequest) {
       } catch { /* silent — don't fail the whole request */ }
     }
 
-    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, selectOptions, relationOptionIds, rollupRelationProps } });
+    return NextResponse.json({ success: true, data: { dateProperty, titleProperty, dateProperties, titleProperties, groupableProperties, checkboxProperties, rowProperties, selectOptions, relationOptionIds, rollupRelationProps } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ success: false, error: { message: msg } }, { status: 500 });

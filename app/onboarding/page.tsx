@@ -37,6 +37,9 @@ interface Settings {
   titleProperty: string;
   groupProperty: string;
   dependencyProperty: string;
+  highlightProperty: string;
+  highlightBorderColor: string;
+  rowProperty: string;
   primaryColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -88,6 +91,8 @@ function OnboardingPageInner() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
+  const [checkboxProperties, setCheckboxProperties] = useState<string[]>([]);
+  const [rowProperties, setRowProperties] = useState<{ name: string; type: string }[]>([]);
   const [dateProperties, setDateProperties] = useState<string[]>([]);
   const [titleProperties, setTitleProperties] = useState<{ name: string; type: string }[]>([]);
   const [selectedDbName, setSelectedDbName] = useState("");
@@ -150,6 +155,9 @@ function OnboardingPageInner() {
           titleProperty: (json.titleProp as string) ?? prev.titleProperty,
           groupProperty,
           dependencyProperty: (json.dependsProp as string) ?? "",
+          highlightProperty: (json.highlightProp as string) ?? "",
+          highlightBorderColor: (json.highlightBorderColor as string) ?? "#FF5A5F",
+          rowProperty: (json.rowProp as string) ?? "",
           primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
           backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
           backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
@@ -183,6 +191,8 @@ function OnboardingPageInner() {
           const data = await res.json();
           if (data.success && data.data) {
             setGroupableProperties(data.data.groupableProperties ?? []);
+            setCheckboxProperties(data.data.checkboxProperties ?? []);
+            setRowProperties(data.data.rowProperties ?? []);
             setDateProperties(data.data.dateProperties ?? []);
             setTitleProperties(data.data.titleProperties ?? []);
             setSelectOptions(data.data.selectOptions ?? {});
@@ -269,6 +279,9 @@ function OnboardingPageInner() {
     titleProperty: "제목",
     groupProperty: "",
     dependencyProperty: "",
+    highlightProperty: "",
+    highlightBorderColor: "#FF5A5F",
+    rowProperty: "",
     primaryColor: "#B5E3F0",
     backgroundColor: "#FFFCF9",
     backgroundOpacity: 100,
@@ -298,6 +311,8 @@ function OnboardingPageInner() {
       .then((json) => {
         if (json.success && json.data) {
           setGroupableProperties(json.data.groupableProperties ?? []);
+        setCheckboxProperties(json.data.checkboxProperties ?? []);
+        setRowProperties(json.data.rowProperties ?? []);
           setDateProperties(json.data.dateProperties ?? []);
           setTitleProperties(json.data.titleProperties ?? []);
           setSelectOptions(json.data.selectOptions ?? {});
@@ -375,6 +390,8 @@ function OnboardingPageInner() {
           dependencyProperty: "",
         }));
         setGroupableProperties(json.data.groupableProperties ?? []);
+        setCheckboxProperties(json.data.checkboxProperties ?? []);
+        setRowProperties(json.data.rowProperties ?? []);
         setDateProperties(json.data.dateProperties ?? []);
         setTitleProperties(json.data.titleProperties ?? []);
         setSelectOptions(json.data.selectOptions ?? {});
@@ -397,6 +414,8 @@ function OnboardingPageInner() {
       const json = await res.json();
       if (json.success && json.data) {
         setGroupableProperties(json.data.groupableProperties ?? []);
+        setCheckboxProperties(json.data.checkboxProperties ?? []);
+        setRowProperties(json.data.rowProperties ?? []);
         setDateProperties(json.data.dateProperties ?? []);
         setTitleProperties(json.data.titleProperties ?? []);
         setSelectOptions(json.data.selectOptions ?? {});
@@ -490,6 +509,8 @@ function OnboardingPageInner() {
         titleProp: settings.titleProperty,
         ...(settings.groupProperty.trim() ? { groupProp: settings.groupProperty.trim() } : {}),
         ...(settings.dependencyProperty.trim() ? { dependsProp: settings.dependencyProperty.trim() } : {}),
+        ...(settings.highlightProperty.trim() ? { highlightProp: settings.highlightProperty.trim(), highlightBorderColor: settings.highlightBorderColor } : {}),
+        ...(settings.rowProperty.trim() ? { rowProp: settings.rowProperty.trim() } : {}),
         primaryColor: settings.primaryColor,
         backgroundColor: settings.backgroundColor,
         backgroundOpacity: settings.backgroundOpacity,
@@ -1042,6 +1063,62 @@ function OnboardingPageInner() {
                     </div>
                   );
                 })()}
+
+                {/* 강조(테두리) 속성 + 행 위치 속성 */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                      ⭐ 강조(테두리) 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(체크박스, 선택)</span>
+                    </label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {checkboxProperties.length > 0 ? (
+                        <select className="soft-select" value={settings.highlightProperty}
+                          onChange={(e) => update("highlightProperty", e.target.value)}
+                          style={{ marginBottom: 0, fontSize: 13, flex: 1 }}>
+                          <option value="">— 없음 —</option>
+                          {checkboxProperties.map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input className="soft-input" value={settings.highlightProperty}
+                          onChange={(e) => update("highlightProperty", e.target.value)}
+                          placeholder="예: 중요"
+                          style={{ marginBottom: 0, fontSize: 13, flex: 1 }} />
+                      )}
+                      <input type="color" value={settings.highlightBorderColor}
+                        onChange={(e) => update("highlightBorderColor", e.target.value)}
+                        title="테두리 색"
+                        style={{ width: 30, height: 30, padding: 0, border: "1px solid #ddd", borderRadius: 6, cursor: "pointer", flexShrink: 0 }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                      체크된 항목에 테두리를 표시합니다
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                      ↕ 행 위치 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(선택)</span>
+                    </label>
+                    {rowProperties.length > 0 ? (
+                      <select className="soft-select" value={settings.rowProperty}
+                        onChange={(e) => update("rowProperty", e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13 }}>
+                        <option value="">— 없음 —</option>
+                        {rowProperties.map((p) => (
+                          <option key={p.name} value={p.name}>{p.name} ({p.type})</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.rowProperty}
+                        onChange={(e) => update("rowProperty", e.target.value)}
+                        placeholder="예: 행위치"
+                        style={{ marginBottom: 0, fontSize: 13 }} />
+                    )}
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                      줄 위치를 이 속성에 저장하고 다음에 그대로 불러옵니다
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* 라이브 프리뷰 */}

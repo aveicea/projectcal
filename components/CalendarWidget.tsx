@@ -57,6 +57,9 @@ interface CalendarConfig {
     titleProperty: string;
     groupProperty?: string;
     dependencyProperty?: string;
+    highlightProperty?: string;
+    highlightBorderColor?: string;
+    rowProperty?: string;
   };
   theme: CalendarTheme;
 }
@@ -741,6 +744,8 @@ export default function CalendarWidget({
               titleProp: config.notionConfig.titleProperty,
               ...(config.notionConfig.groupProperty ? { groupProp: config.notionConfig.groupProperty } : {}),
               ...(config.notionConfig.dependencyProperty ? { dependsProp: config.notionConfig.dependencyProperty } : {}),
+              ...(config.notionConfig.highlightProperty ? { highlightProp: config.notionConfig.highlightProperty } : {}),
+              ...(config.notionConfig.rowProperty ? { rowProp: config.notionConfig.rowProperty } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -819,6 +824,11 @@ export default function CalendarWidget({
     ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
     : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
+  // Notion "행 위치" 속성에 저장된 줄 위치를 먼저 반영 (복원)
+  allDisplayProjects.forEach((p) => {
+    if (p.rowPos != null && effectiveRowMap.has(p.id)) effectiveRowMap.set(p.id, p.rowPos);
+  });
+  // 이번 세션 드래그로 바뀐 줄 위치를 그 위에 반영
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
@@ -832,7 +842,7 @@ export default function CalendarWidget({
   // 12px horizontal padding, and bars start below the date header (HEADER_OFFSET).
   const GRID_PAD = 12;
   const HEADER_OFFSET = 40; // date header height (34) + marginBottom (6)
-  const dependencyConnectors: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; sameRow: boolean }> = [];
+  const dependencyConnectors: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; sameRow: boolean; backward: boolean }> = [];
   // Bars to mask out so connector lines never show through the (translucent) bars.
   const barMaskRects: Array<{ id: string; x: number; y: number; w: number; h: number }> = [];
   if (hasDeps && displayDays.length > 0) {
@@ -856,7 +866,9 @@ export default function CalendarWidget({
         const pRow = effectiveRowMap.get(pred.id) ?? 0;
         const x1 = GRID_PAD + (idxFor(pred.endDate) + 1) * dayWidth;
         const y1 = HEADER_OFFSET + pRow * ROW_HEIGHT + BAR_HEIGHT / 2;
-        dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow });
+        // 선행 작업이 후속보다 늦게 끝나면(겹치거나 역전) 화살표가 거꾸로 간다
+        const backward = pred.endDate >= succ.startDate;
+        dependencyConnectors.push({ id: `${predId}__${succ.id}`, x1, y1, x2, y2, sameRow: pRow === sRow, backward });
       }
     }
     if (dependencyConnectors.length > 0) {
@@ -901,6 +913,38 @@ export default function CalendarWidget({
     }
     return next;
   }
+
+  // ── Persist Notion drag changes (date / row position) ─────────────────────
+  const persistNotionDate = (pageId: string, startDate: string, endDate: string) => {
+    if (!config || configId === "preview") return;
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: config.notionConfig.apiKey,
+        pageId,
+        property: config.notionConfig.dateProperty,
+        value: { start: startDate, end: endDate },
+        propType: "date",
+      }),
+    }).catch(() => { /* keep optimistic value */ });
+  };
+
+  const persistNotionRow = (pageId: string, row: number) => {
+    const rowProp = config?.notionConfig.rowProperty;
+    if (!config || configId === "preview" || !rowProp) return;
+    fetch("/api/update-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: config.notionConfig.apiKey,
+        pageId,
+        property: rowProp,
+        value: String(row),
+        propType: "select",
+      }),
+    }).catch(() => { /* ignore */ });
+  };
 
   function getSegmentsForDay(dateStr: string): AnySegment[] {
     return allDisplayProjects
@@ -1272,9 +1316,9 @@ export default function CalendarWidget({
                           key={c.id}
                           d={d}
                           fill="none"
-                          stroke={primaryColor}
+                          stroke={c.backward ? "#B01818" : primaryColor}
                           strokeWidth={1.75}
-                          strokeOpacity={0.85}
+                          strokeOpacity={c.backward ? 0.95 : 0.85}
                         />
                       );
                     })}
@@ -1285,7 +1329,7 @@ export default function CalendarWidget({
                       <path
                         key={`${c.id}__arrow`}
                         d={`M ${c.x2 - 5} ${c.y2 - 3.2} L ${c.x2} ${c.y2} L ${c.x2 - 5} ${c.y2 + 3.2} Z`}
-                        fill={primaryColor}
+                        fill={c.backward ? "#B01818" : primaryColor}
                       />
                     ))}
                   </g>
@@ -1434,14 +1478,17 @@ export default function CalendarWidget({
                             updateGCalEvent(project, newStart, project.endDate);
                           }
                         } else if (project) {
-                          // Notion event drag (local only)
+                          // Notion event drag → optimistic local update + persist to Notion
                           if (mode === "move" && dragGrabDate.current) {
                             // Compute target row from drop Y position
                             const zoneRect = e.currentTarget.getBoundingClientRect();
                             const dropRow = Math.max(0, Math.floor((e.clientY - zoneRect.top) / ROW_HEIGHT));
                             const delta = daysBetween(dragGrabDate.current, dateStr);
                             if (delta !== 0) {
-                              setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: addDays(project.startDate, delta), endDate: addDays(project.endDate, delta) }); return next; });
+                              const newStart = addDays(project.startDate, delta);
+                              const newEnd = addDays(project.endDate, delta);
+                              setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: newEnd }); return next; });
+                              persistNotionDate(sourceId, newStart, newEnd);
                             }
                             setRowOverrides((prev) => {
                               const next = bumpRows(sourceId, dropRow, prev);
@@ -1450,12 +1497,15 @@ export default function CalendarWidget({
                               safeStorage.setItem("pcal_row_overrides", JSON.stringify(obj));
                               return next;
                             });
+                            persistNotionRow(sourceId, dropRow);
                           } else if (mode === "resize-end") {
                             const newEnd = dateStr >= project.startDate ? dateStr : project.startDate;
                             setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: project.startDate, endDate: newEnd }); return next; });
+                            persistNotionDate(sourceId, project.startDate, newEnd);
                           } else if (mode === "resize-start") {
                             const newStart = dateStr <= project.endDate ? dateStr : project.endDate;
                             setDateOverrides((prev) => { const next = new Map(prev); next.set(sourceId, { startDate: newStart, endDate: project.endDate }); return next; });
+                            persistNotionDate(sourceId, newStart, project.endDate);
                           }
                         }
                         setDragId(null); setDropDateStr(null); dragMode.current = null; dragGrabDate.current = null;
@@ -1503,6 +1553,17 @@ export default function CalendarWidget({
                           cursor: isUpdating ? "wait" : "grab",
                         } : {};
 
+                        // 강조(체크) 속성이 켜진 노션 일정에 테두리 (두께는 GCal과 동일한 inset 1px)
+                        const hlColor = config?.notionConfig.highlightBorderColor || "#FF5A5F";
+                        const highlightOutlineStyle: React.CSSProperties = (!seg.isGCal && seg.highlighted) ? {
+                          boxShadow: [
+                            `inset 0 1px 0 0 ${hlColor}`,
+                            `inset 0 -1px 0 0 ${hlColor}`,
+                            seg.isStart ? `inset 1px 0 0 0 ${hlColor}` : "",
+                            seg.isEnd ? `inset -1px 0 0 0 ${hlColor}` : "",
+                          ].filter(Boolean).join(", "),
+                        } : {};
+
                         const bgC = seg.isGCal
                           ? gcalColor
                           : isHovered ? seg.color : hexToRgba(seg.color, 0.55);
@@ -1521,6 +1582,7 @@ export default function CalendarWidget({
                               ...shapeStyle,
                               ...(isDragging ? { opacity: 0.3 } : isUpdating ? { opacity: 0.6 } : { opacity: segOpacity }),
                               ...gcalOutlineStyle,
+                              ...highlightOutlineStyle,
                             }}
                             onDoubleClick={(e) => {
                               if (seg.isStart) {
@@ -1552,7 +1614,9 @@ export default function CalendarWidget({
                               setHoveredId(seg.id);
                               setTooltip({
                                 visible: true, x: e.clientX, y: e.clientY,
-                                text: `${seg.title}  ${formatShortDate(seg.startDate)} ~ ${formatShortDate(seg.endDate)}`,
+                                text: seg.startDate === seg.endDate
+                                  ? seg.title
+                                  : `${seg.title}  ${formatShortDate(seg.startDate)} ~ ${formatShortDate(seg.endDate)}`,
                                 color: seg.isGCal ? gcalColor : seg.color,
                               });
                             }}

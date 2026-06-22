@@ -13,6 +13,9 @@ interface Config {
     titleProperty: string;
     groupProperty?: string;
     dependencyProperty?: string;
+    highlightProperty?: string;
+    highlightBorderColor?: string;
+    rowProperty?: string;
   };
   theme: {
     primaryColor: string;
@@ -57,6 +60,9 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         titleProperty: json.titleProp ?? "제목",
         groupProperty: json.groupProp || undefined,
         dependencyProperty: json.dependsProp || undefined,
+        highlightProperty: json.highlightProp || undefined,
+        highlightBorderColor: json.highlightBorderColor || undefined,
+        rowProperty: json.rowProp || undefined,
       },
       theme: {
         primaryColor: json.primaryColor ?? "#E8A8C0",

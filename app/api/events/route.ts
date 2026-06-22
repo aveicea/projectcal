@@ -9,6 +9,10 @@ interface EventConfig {
   groupProp?: string;
   // Notion 관계형 "선행 작업"(predecessor) 속성 이름
   dependsProp?: string;
+  // 강조(체크박스) 속성 — 체크되면 테두리 표시
+  highlightProp?: string;
+  // 행 위치(선택) 속성 — 줄 위치 저장/복원
+  rowProp?: string;
 }
 
 type RollupValue =
@@ -27,6 +31,7 @@ type PropMap = Record<string, {
   formula?: { string?: string };
   rollup?: RollupValue;
   relation?: Array<{ id: string }>;
+  checkbox?: boolean;
 }>;
 
 export async function POST(req: NextRequest) {
@@ -51,6 +56,7 @@ export async function POST(req: NextRequest) {
     type RawEvent = {
       id: string; title: string; startDate: string; endDate: string;
       pageUrl: string; group?: string; relationIds?: string[]; dependsOn?: string[];
+      highlighted?: boolean; rowPos?: number;
     };
 
     const rawEvents: RawEvent[] = [];
@@ -129,12 +135,34 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // 강조(체크박스) 속성
+      let highlighted: boolean | undefined;
+      if (config.highlightProp) {
+        const hp = props[config.highlightProp];
+        if (hp?.type === "checkbox") highlighted = !!hp.checkbox;
+      }
+
+      // 행 위치(선택) 속성 → 숫자
+      let rowPos: number | undefined;
+      if (config.rowProp) {
+        const rp = props[config.rowProp];
+        let raw: string | undefined;
+        if (rp?.type === "select") raw = rp.select?.name;
+        else if (rp?.type === "rich_text") raw = rp.rich_text?.map((t) => t.plain_text ?? "").join("");
+        if (raw != null && raw !== "") {
+          const n = parseInt(raw, 10);
+          if (!Number.isNaN(n) && n >= 0) rowPos = n;
+        }
+      }
+
       rawEvents.push({
         id: page.id, title, startDate: eventStart, endDate: eventEnd,
         pageUrl: (page as { url?: string }).url ?? "#",
         ...(group ? { group } : {}),
         ...(relationIds ? { relationIds } : {}),
         ...(dependsOn ? { dependsOn } : {}),
+        ...(highlighted ? { highlighted } : {}),
+        ...(rowPos != null ? { rowPos } : {}),
       });
     }
 
