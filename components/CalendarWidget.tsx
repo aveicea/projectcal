@@ -858,6 +858,24 @@ export default function CalendarWidget({
     bodyRef.current.scrollLeft = offset;
   };
 
+  // 오늘 날짜로 이동: 멀리 이동한 상태여도 오늘이 포함된 달/주로 리셋 후 스크롤
+  // (새로고침했을 때 보이는 그 화면)
+  const goToToday = () => {
+    const now = new Date();
+    const ty = now.getFullYear(), tm = now.getMonth();
+    const tw = formatDate(getWeekStart(now));
+    scrolledRef.current = false;
+    if (weekView) {
+      if (weekStartStr === tw) scrollToToday();
+      else setWeekStartStr(tw);
+    } else if (centerYear === ty && centerMonth === tm) {
+      scrollToToday();
+    } else {
+      setCenterYear(ty);
+      setCenterMonth(tm);
+    }
+  };
+
   const formatShortDate = (dateStr: string) => {
     const d = new Date(dateStr + "T00:00:00");
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -1299,7 +1317,7 @@ export default function CalendarWidget({
           fontWeight: "bold", letterSpacing: 0.2, flexShrink: 0,
         }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span onClick={scrollToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <span onClick={goToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
               <Link size={12} strokeWidth={2.5} />
               {headerLabel} Timeline
             </span>
@@ -1378,6 +1396,10 @@ export default function CalendarWidget({
               minWidth: 220,
               maxWidth: 280,
               fontSize: 11,
+              // 위젯 높이 안에 맞추고, 더 길면 패널 전체를 스크롤
+              maxHeight: "calc(100% - 24px)",
+              overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
             {/* Panel header */}
@@ -1404,7 +1426,7 @@ export default function CalendarWidget({
                 {" "}불러오는 중...
               </div>
             ) : (
-              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              <div>
                 {[...gcalCalendars].sort((a, b) => {
                   const ai = gcalCalendarOrder.indexOf(a.id);
                   const bi = gcalCalendarOrder.indexOf(b.id);
@@ -1634,7 +1656,7 @@ export default function CalendarWidget({
                     <div
                       data-pcal-header="1"
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
-                      onClick={scrollToToday}
+                      onClick={goToToday}
                     >
                       {isMonthBoundary ? (
                         <span style={{
@@ -1837,10 +1859,10 @@ export default function CalendarWidget({
                               const hasOutgoing = referencedPredIds.has(seg.id);
                               const circle: React.CSSProperties = {
                                 position: "absolute", top: "50%", transform: "translateY(-50%)",
-                                width: 12, height: 12, borderRadius: "50%", zIndex: 30, touchAction: "none",
+                                width: 8, height: 8, borderRadius: "50%", zIndex: 30, touchAction: "none",
                                 boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
                                 display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                                fontSize: 7, fontWeight: 700, lineHeight: 1,
                               };
                               return (
                                 <>
@@ -1849,13 +1871,13 @@ export default function CalendarWidget({
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -15, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, left: -11, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="선행 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                      style={{ ...circle, left: -15, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, left: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                   {seg.isEnd && (hasOutgoing ? (
@@ -1863,13 +1885,13 @@ export default function CalendarWidget({
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -15, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, right: -11, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="후속 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                      style={{ ...circle, right: -15, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, right: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                 </>
