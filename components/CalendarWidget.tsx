@@ -1871,7 +1871,7 @@ export default function CalendarWidget({
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -11, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, left: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
@@ -1885,7 +1885,7 @@ export default function CalendarWidget({
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -11, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, right: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
