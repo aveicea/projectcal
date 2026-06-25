@@ -180,6 +180,8 @@ export default function CalendarWidget({
   const [showGCalPanel, setShowGCalPanel] = useState(false);
   const [syncingNotionId, setSyncingNotionId] = useState<string | null>(null);
   const [syncedIds, setSyncedIds] = useState<Set<string>>(new Set());
+  // GCal → Notion 가져오기 진행 중인 이벤트 id
+  const [importingId, setImportingId] = useState<string | null>(null);
   const [gcalUpdatingId, setGcalUpdatingId] = useState<string | null>(null);
   // Notion IDs that have a corresponding event in GCal → hide the Notion bar
   const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
@@ -615,6 +617,48 @@ export default function CalendarWidget({
       console.error("Sync error:", e);
     } finally {
       setSyncingNotionId(null);
+    }
+  };
+
+  // 구글 일정 → 노션으로 가져오기. 성공 시 구글 일정은 삭제하고 노션에만 남긴다.
+  const importToNotion = async (seg: AnySegment) => {
+    if (!config || configId === "preview" || !seg.gcalEventId) return;
+    setImportingId(seg.id);
+    try {
+      const res = await fetch("/api/create-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: config.notionConfig.apiKey,
+          databaseId: config.notionConfig.databaseId,
+          titleProperty: config.notionConfig.titleProperty,
+          dateProperty: config.notionConfig.dateProperty,
+          title: seg.title,
+          startDate: seg.startDate,
+          endDate: seg.endDate,
+        }),
+      });
+      const d = await res.json();
+      if (d.success && d.id) {
+        // 노션 일정 추가 (낙관적)
+        const newProj: ProjectSegment = {
+          id: d.id, title: seg.title, startDate: seg.startDate, endDate: seg.endDate,
+          color: barColors[projects.length % barColors.length] || "#FFB3BA",
+          pageUrl: `https://notion.so/${String(d.id).replace(/-/g, "")}`,
+          isStart: false, isEnd: false, duration: 0, rowIndex: 0,
+        };
+        setProjects((prev) => [...prev, newProj]);
+        // 구글 일정 삭제 → 노션에만 남김
+        setGcalProjects((prev) => prev.filter((p) => p.id !== seg.id));
+        if (gcalToken) {
+          fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(seg.gcalEventId)}&calendarId=${encodeURIComponent(seg.gcalCalendarId || "primary")}`)
+            .catch(() => { /* 노션엔 이미 생성됨 */ });
+        }
+      }
+    } catch (e) {
+      console.error("Import error:", e);
+    } finally {
+      setImportingId(null);
     }
   };
 
@@ -1895,13 +1939,13 @@ export default function CalendarWidget({
                               </span>
                             )}
 
-                            {/* Sync to GCal button (Notion events only, when GCal connected) */}
-                            {isHovered && seg.isStart && !seg.isGCal && gcalToken && configId !== "preview" && (
+                            {/* Import to Notion button (GCal events only) — 노션으로 가져오고 구글 일정은 삭제 */}
+                            {isHovered && seg.isStart && seg.isGCal && config && configId !== "preview" && (
                               <button
-                                title={syncedIds.has(seg.id) ? "Google Calendar에 추가됨" : "Google Calendar에 추가"}
+                                title="노션으로 가져오기 (구글 일정은 삭제)"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  syncToGCal(seg);
+                                  importToNotion(seg);
                                 }}
                                 style={{
                                   position: "absolute",
@@ -1910,7 +1954,7 @@ export default function CalendarWidget({
                                   transform: "translateY(-50%)",
                                   fontSize: 7,
                                   padding: "1px 4px",
-                                  background: syncedIds.has(seg.id) ? "#34A853" : primaryColor,
+                                  background: primaryColor,
                                   color: "white",
                                   border: "none",
                                   borderRadius: 3,
@@ -1921,7 +1965,7 @@ export default function CalendarWidget({
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                {syncingNotionId === seg.id ? "..." : syncedIds.has(seg.id) ? "✓" : "→G"}
+                                {importingId === seg.id ? "..." : "→N"}
                               </button>
                             )}
                           </div>
