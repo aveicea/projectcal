@@ -858,6 +858,24 @@ export default function CalendarWidget({
     bodyRef.current.scrollLeft = offset;
   };
 
+  // 오늘 날짜로 이동: 멀리 이동한 상태여도 오늘이 포함된 달/주로 리셋 후 스크롤
+  // (새로고침했을 때 보이는 그 화면)
+  const goToToday = () => {
+    const now = new Date();
+    const ty = now.getFullYear(), tm = now.getMonth();
+    const tw = formatDate(getWeekStart(now));
+    scrolledRef.current = false;
+    if (weekView) {
+      if (weekStartStr === tw) scrollToToday();
+      else setWeekStartStr(tw);
+    } else if (centerYear === ty && centerMonth === tm) {
+      scrollToToday();
+    } else {
+      setCenterYear(ty);
+      setCenterMonth(tm);
+    }
+  };
+
   const formatShortDate = (dateStr: string) => {
     const d = new Date(dateStr + "T00:00:00");
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -1299,7 +1317,7 @@ export default function CalendarWidget({
           fontWeight: "bold", letterSpacing: 0.2, flexShrink: 0,
         }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span onClick={scrollToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <span onClick={goToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
               <Link size={12} strokeWidth={2.5} />
               {headerLabel} Timeline
             </span>
@@ -1638,7 +1656,7 @@ export default function CalendarWidget({
                     <div
                       data-pcal-header="1"
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
-                      onClick={scrollToToday}
+                      onClick={goToToday}
                     >
                       {isMonthBoundary ? (
                         <span style={{
