@@ -1805,13 +1805,13 @@ export default function CalendarWidget({
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, left: -15, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="선행 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                      style={{ ...circle, left: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, left: -15, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                   {seg.isEnd && (hasOutgoing ? (
@@ -1819,13 +1819,13 @@ export default function CalendarWidget({
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, right: -15, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="후속 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                      style={{ ...circle, right: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, right: -15, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                 </>
