@@ -1378,6 +1378,10 @@ export default function CalendarWidget({
               minWidth: 220,
               maxWidth: 280,
               fontSize: 11,
+              // 위젯 높이 안에 맞추고, 더 길면 패널 전체를 스크롤
+              maxHeight: "calc(100% - 24px)",
+              overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
             {/* Panel header */}
@@ -1404,7 +1408,7 @@ export default function CalendarWidget({
                 {" "}불러오는 중...
               </div>
             ) : (
-              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              <div>
                 {[...gcalCalendars].sort((a, b) => {
                   const ai = gcalCalendarOrder.indexOf(a.id);
                   const bi = gcalCalendarOrder.indexOf(b.id);
