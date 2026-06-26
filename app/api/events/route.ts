@@ -17,6 +17,8 @@ interface EventConfig {
   doneProp?: string;
   // 플래너 DB id — 이 DB로 연결된 관계형에 항목이 있으면 "이미 보냄(sent)"으로 표시
   plannerDbId?: string;
+  // 네이티브 "상위 항목" 관계형 이름 — 값이 있으면 그 페이지는 하위 항목(개별 막대로 표시 안 함)
+  parentRelProp?: string;
 }
 
 type RollupValue =
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
     type RawEvent = {
       id: string; title: string; startDate: string; endDate: string;
       pageUrl: string; group?: string; relationIds?: string[]; dependsOn?: string[];
-      highlighted?: boolean; rowPos?: number; done?: boolean; sent?: boolean;
+      highlighted?: boolean; rowPos?: number; done?: boolean; sent?: boolean; parentId?: string;
     };
 
     const rawEvents: RawEvent[] = [];
@@ -214,6 +216,13 @@ export async function POST(req: NextRequest) {
         sent = lp?.type === "relation" && (lp.relation?.length ?? 0) > 0;
       }
 
+      // 상위 항목(부모) — "상위 항목" 관계형에 값이 있으면 하위 항목
+      let parentId: string | undefined;
+      if (config.parentRelProp) {
+        const pr = props[config.parentRelProp];
+        if (pr?.type === "relation" && pr.relation && pr.relation.length > 0) parentId = pr.relation[0].id;
+      }
+
       rawEvents.push({
         id: page.id, title, startDate: eventStart, endDate: eventEnd,
         pageUrl: (page as { url?: string }).url ?? "#",
@@ -224,6 +233,7 @@ export async function POST(req: NextRequest) {
         ...(rowPos != null ? { rowPos } : {}),
         ...(done ? { done } : {}),
         ...(sent ? { sent } : {}),
+        ...(parentId ? { parentId } : {}),
       });
     }
 

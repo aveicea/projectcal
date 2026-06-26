@@ -16,6 +16,8 @@ export interface Project {
   done?: boolean;
   // 이미 플래너로 보냄 — 연결 관계형에 항목이 있으면 true
   sent?: boolean;
+  // 상위 항목(부모) 페이지 id — 있으면 이 항목은 하위 항목
+  parentId?: string;
 }
 
 export interface ProjectSegment extends Project {

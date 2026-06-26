@@ -170,6 +170,8 @@ export default function CalendarWidget({
   // 그룹 팝업: 위젯 본문 영역 안에서 항목 기준 세로 중앙 정렬 + 경계 클램프 (측정 기반)
   const popupRef = useRef<HTMLDivElement>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; maxH: number } | null>(null);
+  // 상위 항목 토글 → 하위 항목 목록 팝업
+  const [childPopup, setChildPopup] = useState<{ id: string; x: number; y: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
@@ -858,6 +860,7 @@ export default function CalendarWidget({
               ...(config.notionConfig.rowProperty ? { rowProp: config.notionConfig.rowProperty } : {}),
               ...(config.notionConfig.doneProperty ? { doneProp: config.notionConfig.doneProperty } : {}),
               ...(config.notionConfig.plannerDbId ? { plannerDbId: config.notionConfig.plannerDbId } : {}),
+              ...(config.notionConfig.parentRelProp ? { parentRelProp: config.notionConfig.parentRelProp } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -932,10 +935,21 @@ export default function CalendarWidget({
 
   // ── Layout computation ────────────────────────────────────────────────────
 
+  // 상위→하위 항목 맵 (하위 항목은 개별 막대로 표시하지 않고 상위 토글 안에서 보여준다)
+  const childrenByParent = new Map<string, Project[]>();
+  for (const p of projects) {
+    if (p.parentId) {
+      const arr = childrenByParent.get(p.parentId) ?? [];
+      arr.push(p);
+      childrenByParent.set(p.parentId, arr);
+    }
+  }
+
   // Apply date overrides to both Notion and GCal events
   // Hide Notion events that have been synced to GCal (show GCal version instead)
+  // 하위 항목(parentId 있음)은 막대로 렌더하지 않음
   const effectiveNotionProjects: AnySegment[] = projects
-    .filter((p) => !gcalSyncedNotionIds.has(p.id))
+    .filter((p) => !gcalSyncedNotionIds.has(p.id) && !p.parentId)
     .map((p) => {
       const o = dateOverrides.get(p.id);
       return o ? { ...p, ...o } : p;
@@ -1512,7 +1526,7 @@ export default function CalendarWidget({
             )}
             {widgetConfigStr ? (
               <a
-                href={`/onboarding?from=${widgetConfigStr}`}
+                href={`/setup?from=${widgetConfigStr}`}
                 title="설정 수정"
                 style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7, textDecoration: "none", cursor: "pointer" }}
               >
@@ -1856,6 +1870,8 @@ export default function CalendarWidget({
                     >
                       {segments.map((seg) => {
                         const isHovered = hoveredId === seg.id;
+                        const segChildren = !seg.isGCal ? childrenByParent.get(seg.id) : undefined;
+                        const hasChildren = !!segChildren && segChildren.length > 0;
                         const isDragging = dragId === seg.id;
                         const isUpdating = gcalUpdatingId === seg.id;
                         const row = effectiveRowMap.get(seg.id) ?? 0;
@@ -2096,13 +2112,13 @@ export default function CalendarWidget({
                               );
                             })() : showLabel && (
                               <span style={{
-                                position: "absolute", left: 2, display: "flex",
+                                position: "absolute", left: hasChildren && seg.isStart ? 13 : 2, display: "flex",
                                 justifyContent: "flex-start", alignItems: "center",
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 pointerEvents: "none", fontSize: 9,
                                 color: labelColor,
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
-                                width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
+                                width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4 - (hasChildren && seg.isStart ? 11 : 0), 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
                                 textDecoration: seg.done ? "line-through" : "none",
                                 opacity: seg.done ? 0.6 : 1,
@@ -2110,6 +2126,20 @@ export default function CalendarWidget({
                                 {isUpdating && <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite", marginRight: 2 }}>↻</span>}
                                 {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
                               </span>
+                            )}
+                            {/* 상위 항목 디스클로저 토글 — 하위 항목을 팝업으로 펼침 */}
+                            {hasChildren && seg.isStart && (
+                              <button
+                                title={`하위 항목 ${segChildren!.length}개 보기`}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setChildPopup({ id: seg.id, x: r.left, y: r.bottom }); }}
+                                style={{
+                                  position: "absolute", left: 2, top: "50%", transform: "translateY(-50%)",
+                                  width: 11, height: 11, padding: 0, border: "none", background: "transparent",
+                                  color: "rgba(255,255,255,0.95)", fontSize: 8, lineHeight: 1, cursor: "pointer",
+                                  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 320,
+                                }}
+                              >▶</button>
                             )}
 
                             {/* Import to Notion button (GCal events only) — 노션으로 가져오고 구글 일정은 삭제 */}
@@ -2366,6 +2396,45 @@ export default function CalendarWidget({
             </div>
           </div>
         </div>
+        );
+      })()}
+
+      {/* 상위 항목 토글 → 하위 항목 목록 */}
+      {childPopup && (() => {
+        const kids = childrenByParent.get(childPopup.id) ?? [];
+        const popupW = 190;
+        const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+        const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+        const left = Math.min(Math.max(childPopup.x, 8), vw - popupW - 8);
+        const top = Math.min(childPopup.y + 4, vh - 200);
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setChildPopup(null)}>
+            <div
+              style={{
+                position: "fixed", left, top, width: popupW, maxHeight: 220, overflowY: "auto",
+                background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                border: "1px solid #eee", padding: "6px 0", zIndex: 10001,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {kids.length === 0 ? (
+                <div style={{ padding: "6px 12px", fontSize: 11, color: "#aaa" }}>하위 항목 없음</div>
+              ) : kids.map((k) => (
+                <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 12px", fontSize: 11, color: "#444" }}>
+                  <div style={{
+                    width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+                    border: `1.5px solid ${k.done ? primaryColor : "#ccc"}`, background: k.done ? primaryColor : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {k.done && <span style={{ color: "#fff", fontSize: 9, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: k.done ? "line-through" : "none", opacity: k.done ? 0.6 : 1 }}>
+                    {k.title}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         );
       })()}
 
