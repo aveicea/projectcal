@@ -162,6 +162,7 @@ export default function CalendarWidget({
   const [sendPopup, setSendPopup] = useState<{ id: string; title: string } | null>(null);
   const [sendText, setSendText] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const [sendError, setSendError] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   // Pointer-based drag (works on mouse + touch). Replaces native HTML5 DnD.
@@ -1091,6 +1092,7 @@ export default function CalendarWidget({
     if (!nc.plannerDbId) return;
     const subTitles = sendText.split("\n").map((s) => s.trim()).filter(Boolean);
     setSendState("sending");
+    setSendError("");
     try {
       const res = await fetch("/api/send-to-planner", {
         method: "POST",
@@ -1116,6 +1118,7 @@ export default function CalendarWidget({
       setTimeout(() => { setSendPopup(null); setSendText(""); setSendState("idle"); fetchProjects(); }, 700);
     } catch (e) {
       console.error(e);
+      setSendError(e instanceof Error ? e.message : String(e));
       setSendState("error");
     }
   };
@@ -2099,6 +2102,7 @@ export default function CalendarWidget({
                     setSendPopup({ id: eventPopup.id, title: cur?.title ?? "" });
                     setSendText("");
                     setSendState("idle");
+                    setSendError("");
                     setEventPopup(null);
                   }}
                   style={{
@@ -2239,7 +2243,9 @@ export default function CalendarWidget({
               }}
             />
             {sendState === "error" && (
-              <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 10 }}>보내기에 실패했습니다. 다시 시도해 주세요.</div>
+              <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 10, wordBreak: "break-word" }}>
+                보내기에 실패했습니다.{sendError ? ` (${sendError})` : " 다시 시도해 주세요."}
+              </div>
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button

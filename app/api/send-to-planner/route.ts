@@ -116,14 +116,22 @@ export async function POST(req: NextRequest) {
     const titles = (b.subTitles ?? []).map((t) => t.trim()).filter(Boolean);
     const created: { plannerId: string; subItemId?: string }[] = [];
 
+    const withStep = async <T>(step: string, fn: () => Promise<T>): Promise<T> => {
+      try { return await fn(); }
+      catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        throw new Error(`[${step}] ${m}`);
+      }
+    };
+
     if (titles.length === 0) {
       // 하위 없이 상위 제목 그대로 플래너 1개
-      const plannerId = await createPlannerPage(parentTitle, [b.parentPageId]);
+      const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(parentTitle, [b.parentPageId]));
       created.push({ plannerId });
     } else {
       for (const title of titles) {
-        const subItemId = await createSubItem(title);
-        const plannerId = await createPlannerPage(title, [b.parentPageId, subItemId]);
+        const subItemId = await withStep("하위 항목 생성", () => createSubItem(title));
+        const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(title, [b.parentPageId, subItemId]));
         created.push({ plannerId, subItemId });
       }
     }
