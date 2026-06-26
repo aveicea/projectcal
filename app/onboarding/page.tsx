@@ -99,6 +99,9 @@ function OnboardingPageInner() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [databases, setDatabases] = useState<{ id: string; title: string }[]>([]);
+  // 플래너 연결: 같은(또는 별도) 토큰으로 DB 목록 불러와 선택 + 속성 자동 감지
+  const [plannerDatabases, setPlannerDatabases] = useState<{ id: string; title: string }[]>([]);
+  const [plannerDbLoading, setPlannerDbLoading] = useState(false);
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
   const [checkboxProperties, setCheckboxProperties] = useState<string[]>([]);
   const [rowProperties, setRowProperties] = useState<{ name: string; type: string }[]>([]);
@@ -469,6 +472,75 @@ function OnboardingPageInner() {
         }
       }
     } catch { /* silent */ }
+  };
+
+  // ── 플래너 연결 ─────────────────────────────────────────────────────────────
+
+  // 이름 키워드로 속성 자동 매칭
+  const pickProp = (names: string[], keywords: string[], fallback: string) =>
+    names.find((n) => keywords.some((k) => n.toLowerCase().includes(k.toLowerCase()))) || fallback;
+
+  // 같은(또는 별도) 토큰으로 플래너 후보 DB 목록 불러오기
+  const handleLoadPlannerDatabases = async () => {
+    const token = settings.plannerToken.trim() || settings.apiKey.trim();
+    if (!token) { setErrorMsg("먼저 Notion API 토큰을 입력해주세요."); return; }
+    setPlannerDbLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/databases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: token }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error?.message || "데이터베이스를 불러오는데 실패했습니다.");
+      setPlannerDatabases(json.data ?? []);
+      if (!json.data?.length) setErrorMsg("연결된 데이터베이스가 없습니다. Notion Integration을 플래너 DB에 연결해주세요.");
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.");
+    } finally {
+      setPlannerDbLoading(false);
+    }
+  };
+
+  // 플래너 DB 선택 → 속성 자동 감지(제목/날짜/책/연결 관계형) + 프젝칼 쪽 속성(상위 항목/책/완료)도 자동 채움
+  const handleSelectPlannerDb = async (dbId: string) => {
+    update("plannerDbId", dbId);
+    if (!dbId) return;
+    const token = settings.plannerToken.trim() || settings.apiKey.trim();
+    try {
+      const res = await fetch("/api/analyze-database", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: token, databaseId: dbId }),
+      });
+      const json = await res.json();
+      const data = json?.data;
+      if (!json.success || !data) return;
+
+      const plannerRelations: string[] = (data.groupableProperties ?? [])
+        .filter((p: { type: string }) => p.type === "relation")
+        .map((p: { name: string }) => p.name);
+
+      // 프젝칼(메인 DB) 쪽 속성 — 이미 분석된 shared 상태에서 자동 매칭
+      const mainRelations = groupableProperties.filter((p) => p.type === "relation").map((p) => p.name);
+      const mainDoneCandidates = [
+        ...groupableProperties.filter((p) => p.type === "rollup" || p.type === "formula").map((p) => p.name),
+        ...checkboxProperties,
+      ];
+
+      setSettings((prev) => ({
+        ...prev,
+        plannerDbId: dbId,
+        plannerTitleProp: data.titleProperty || prev.plannerTitleProp || "범위",
+        plannerDateProp: data.dateProperty || prev.plannerDateProp || "날짜",
+        plannerBookProp: pickProp(plannerRelations, ["책", "book", "도서"], prev.plannerBookProp || "책"),
+        plannerLinkProp: pickProp(plannerRelations, ["planner", "프젝", "프로젝", "project", "캘린"], prev.plannerLinkProp || "PLANNER"),
+        parentRelProp: pickProp(mainRelations, ["상위", "parent", "상위 항목"], prev.parentRelProp || "상위 항목"),
+        bookProperty: pickProp(mainRelations, ["책", "book", "도서"], prev.bookProperty || "책"),
+        doneProperty: prev.doneProperty.trim() || pickProp(mainDoneCandidates, ["완료", "done", "complete", "체크"], ""),
+      }));
+    } catch { /* silent — 사용자가 수동 보정 가능 */ }
   };
 
   // ── Google Calendar ───────────────────────────────────────────────────────
@@ -1185,22 +1257,40 @@ function OnboardingPageInner() {
                 <div style={{ fontSize: 12, color: "#88a", marginBottom: 16 }}>
                   설정하면 달력 항목을 클릭해 플래너로 보낼 수 있습니다. 제목·날짜·책을 복사하고 관계형으로 연결됩니다.
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div>
-                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>플래너 데이터베이스 ID</label>
-                    <input className="soft-input" value={settings.plannerDbId}
-                      onChange={(e) => update("plannerDbId", e.target.value)}
-                      placeholder="플래너 DB ID (32자리)"
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                <div>
+                  <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                    플래너 토큰 <span style={{ fontWeight: 400, color: "#bbb" }}>(비우면 위 토큰 공유)</span>
+                  </label>
+                  <input type="password" className="soft-input" value={settings.plannerToken}
+                    onChange={(e) => { update("plannerToken", e.target.value); setPlannerDatabases([]); }}
+                    placeholder="secret_... (선택)"
+                    style={{ marginBottom: 12, fontSize: 13 }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>플래너 데이터베이스</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {plannerDatabases.length > 0 ? (
+                      <select className="soft-select" value={settings.plannerDbId}
+                        onChange={(e) => handleSelectPlannerDb(e.target.value)}
+                        style={{ marginBottom: 0, fontSize: 13, flex: 1 }}>
+                        <option value="">— 선택 —</option>
+                        {plannerDatabases.map((db) => (
+                          <option key={db.id} value={db.id}>{db.title}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="soft-input" value={settings.plannerDbId}
+                        onChange={(e) => update("plannerDbId", e.target.value)}
+                        placeholder="목록 불러오기 또는 DB ID 직접 입력"
+                        style={{ marginBottom: 0, fontSize: 13, flex: 1 }} />
+                    )}
+                    <button className="soft-btn secondary" onClick={handleLoadPlannerDatabases} disabled={plannerDbLoading}
+                      style={{ whiteSpace: "nowrap", fontSize: 13, padding: "0 16px" }}>
+                      {plannerDbLoading ? "로딩..." : "목록 불러오기"}
+                    </button>
                   </div>
-                  <div>
-                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
-                      플래너 토큰 <span style={{ fontWeight: 400, color: "#bbb" }}>(비우면 위 토큰 공유)</span>
-                    </label>
-                    <input type="password" className="soft-input" value={settings.plannerToken}
-                      onChange={(e) => update("plannerToken", e.target.value)}
-                      placeholder="secret_... (선택)"
-                      style={{ marginBottom: 0, fontSize: 13 }} />
+                  <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                    같은 토큰으로 연결된 DB를 불러옵니다. 선택하면 속성(제목·날짜·책·연결·완료)을 자동 감지합니다
                   </div>
                 </div>
                 <div style={{ marginTop: 12 }}>
