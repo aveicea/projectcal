@@ -987,18 +987,40 @@ export default function CalendarWidget({
     ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
     : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
-  // Notion "행 위치" 속성에 저장된 줄 위치를 먼저 반영 (복원)
+  // Notion "행 위치" 속성에 저장된 줄 위치를 먼저 반영 (복원) — 단, 하위 항목은 줄 속성 무시
   allDisplayProjects.forEach((p) => {
+    if (p.parentId) return;
     if (p.rowPos != null && effectiveRowMap.has(p.id)) effectiveRowMap.set(p.id, p.rowPos);
   });
-  // 이번 세션 드래그로 바뀐 줄 위치를 그 위에 반영
+  // 이번 세션 드래그로 바뀐 줄 위치를 그 위에 반영 (드래그가 우선)
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
 
-  // 두 줄 보기: 저장된 줄 위치/복원으로 겹침이 생겨도 절대 겹치지 않게 해소(아래로 밀기).
-  // 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄.
-  if (multiRow && !hasDeps) {
+  // 펼친 상위 항목: 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
+  // 단, 사용자가 직접 드래그한 하위는 그 위치를 존중. 전역으로 밀지 않고 겹침은 아래 해소 패스가 처리.
+  if (expandedParents.size > 0) {
+    const parents = allDisplayProjects
+      .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
+      .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
+    for (const P of parents) {
+      const pRow = effectiveRowMap.get(P.id) ?? 0;
+      const kids = [...(childrenByParent.get(P.id) ?? [])]
+        .filter((k) => !rowOverrides.has(k.id))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+      const rowEnds: string[] = [];
+      for (const c of kids) {
+        let r = rowEnds.findIndex((end) => c.startDate > end);
+        if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
+        else rowEnds[r] = c.endDate;
+        effectiveRowMap.set(c.id, pRow + 1 + r);
+      }
+    }
+  }
+
+  // 겹침 해소: 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄(절대 겹치지 않게).
+  // 두 줄 보기이거나 펼친 상위 항목이 있을 때 적용.
+  if ((multiRow || expandedParents.size > 0) && !hasDeps) {
     const occ = new Map<number, Array<{ s: string; e: string }>>();
     const conflict = (r: number, s: string, e: string) =>
       (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
@@ -1011,37 +1033,6 @@ export default function CalendarWidget({
       effectiveRowMap.set(p.id, r);
       if (!occ.has(r)) occ.set(r, []);
       occ.get(r)!.push({ s: p.startDate, e: p.endDate });
-    }
-  }
-
-  // 펼친 상위 항목: 하위 항목을 상위 바로 아래 줄에 연속 배치하고, 그 아래 항목들은 밀어낸다.
-  // (줄 속성/기존 배치보다 이 규칙을 우선)
-  if (expandedParents.size > 0) {
-    const parents = allDisplayProjects
-      .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
-      .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
-    for (const P of parents) {
-      const pRow = effectiveRowMap.get(P.id) ?? 0;
-      const kids = [...(childrenByParent.get(P.id) ?? [])].sort((a, b) =>
-        a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
-      const kidIds = new Set(kids.map((k) => k.id));
-      // 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄)
-      const rowEnds: string[] = [];
-      const kidRow = new Map<string, number>();
-      for (const c of kids) {
-        let r = rowEnds.findIndex((end) => c.startDate > end);
-        if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
-        else rowEnds[r] = c.endDate;
-        kidRow.set(c.id, r);
-      }
-      const n = rowEnds.length; // 하위가 차지하는 줄 수
-      // pRow 아래의 다른 항목들을 n칸 밀어 내려 하위 블록 자리를 비움
-      for (const q of allDisplayProjects) {
-        if (q.id === P.id || kidIds.has(q.id)) continue;
-        const qr = effectiveRowMap.get(q.id);
-        if (qr != null && qr > pRow) effectiveRowMap.set(q.id, qr + n);
-      }
-      kids.forEach((c) => effectiveRowMap.set(c.id, pRow + 1 + (kidRow.get(c.id) ?? 0)));
     }
   }
 
