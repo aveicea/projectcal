@@ -1872,12 +1872,8 @@ export default function CalendarWidget({
                               const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
                               if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
-                                const el = e.currentTarget as HTMLElement;
-                                const r = el.getBoundingClientRect();
-                                // 세로 시작은 막대가 아니라 날짜 칸(컬럼) 상단 기준으로 더 위에서 시작
-                                const col = el.closest("[data-pcal-col]") as HTMLElement | null;
-                                const colTop = col ? col.getBoundingClientRect().top : r.top;
-                                const anchor = { left: r.left, right: r.right, top: colTop, bottom: r.bottom };
+                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
                                 if (clickTimer.current) clearTimeout(clickTimer.current);
                                 clickTimer.current = setTimeout(() => {
                                   clickTimer.current = null;
@@ -2216,14 +2212,13 @@ export default function CalendarWidget({
         let left = eventPopup.right;
         if (left + popupW + margin > vw) left = eventPopup.left - popupW;
         left = Math.min(Math.max(left, margin), vw - popupW - margin);
-        // 세로: 기본은 날짜(일정) 위부터 아래로 채움. 아래 공간이 좁고 위가 더 넓으면 위로 자라 날짜를 덮음
-        const belowSpace = vh - eventPopup.top - margin;
+        // 세로: 항목(막대) 아래에 바닥을 맞추고 위로 자란다. 짧으면 항목 옆에 작게, 길면 날짜 쪽으로 올라가며 넘치면 스크롤.
+        // 위 공간이 너무 좁으면 아래로 자라도록 폴백.
         const aboveSpace = eventPopup.bottom - margin;
-        const useAbove = belowSpace < 200 && aboveSpace > belowSpace;
-        const maxH = Math.max(120, useAbove ? aboveSpace : belowSpace);
-        // 내용이 짧아도 날짜(상단)~항목(막대)까지 내려와 겹치도록 최소 높이 보장
-        const minH = useAbove ? undefined : Math.max(0, eventPopup.bottom - eventPopup.top);
-        const vPos: React.CSSProperties = useAbove
+        const belowSpace = vh - eventPopup.top - margin;
+        const growUp = aboveSpace >= 140 || aboveSpace >= belowSpace;
+        const maxH = Math.max(120, growUp ? aboveSpace : belowSpace);
+        const vPos: React.CSSProperties = growUp
           ? { bottom: vh - eventPopup.bottom }
           : { top: eventPopup.top };
         return (
@@ -2233,7 +2228,6 @@ export default function CalendarWidget({
               position: "fixed", left, ...vPos,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
               border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
-              ...(minH ? { minHeight: minH } : {}),
             }}
             onClick={(e) => e.stopPropagation()}
           >
