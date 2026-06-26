@@ -1019,13 +1019,14 @@ export default function CalendarWidget({
   }
 
   // 겹침 해소: 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄(절대 겹치지 않게).
-  // 두 줄 보기이거나 펼친 상위 항목이 있을 때 적용.
-  if ((multiRow || expandedParents.size > 0) && !hasDeps) {
+  // 드래그한(직접 위치 지정한) 항목을 같은 줄에서 먼저 배치 → 끌어 올리면 기존 항목이 밀려난다.
+  if (multiRow || expandedParents.size > 0) {
     const occ = new Map<number, Array<{ s: string; e: string }>>();
     const conflict = (r: number, s: string, e: string) =>
       (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
     const ordered = [...allDisplayProjects].sort((a, b) =>
       ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
+      ((rowOverrides.has(a.id) ? 0 : 1) - (rowOverrides.has(b.id) ? 0 : 1)) ||
       a.startDate.localeCompare(b.startDate));
     for (const p of ordered) {
       let r = effectiveRowMap.get(p.id) ?? 0;
