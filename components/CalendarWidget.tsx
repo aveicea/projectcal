@@ -2084,22 +2084,20 @@ export default function CalendarWidget({
                               const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
                               if (!showHighlight && !showSend) return null;
                               const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
+                              const iconBtn: React.CSSProperties = {
+                                padding: 0, border: "none", background: "transparent", cursor: "pointer",
+                                lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                                filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.35))",
+                              };
                               return (
-                                <div style={{ position: "absolute", left: 2, top: -15, display: "flex", gap: 3, zIndex: 320 }}>
+                                <div style={{ position: "absolute", right: 2, top: -14, display: "flex", gap: 4, zIndex: 320 }}>
                                   {showHighlight && (
                                     <button
                                       title={seg.highlighted ? "강조 해제" : "강조"}
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
-                                      style={{
-                                        width: 14, height: 14, padding: 0, borderRadius: 3, cursor: "pointer",
-                                        border: `1px solid ${seg.highlighted ? hl : "#ccc"}`,
-                                        background: seg.highlighted ? hl : "#fff",
-                                        color: seg.highlighted ? "#fff" : "#999", fontSize: 9, lineHeight: 1,
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                                      }}
-                                    >★</button>
+                                      style={{ ...iconBtn, color: seg.highlighted ? hl : "#bbb", fontSize: 12 }}
+                                    >{seg.highlighted ? "★" : "☆"}</button>
                                   )}
                                   {showSend && (
                                     <button
@@ -2112,12 +2110,7 @@ export default function CalendarWidget({
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
-                                      style={{
-                                        width: 14, height: 14, padding: 0, borderRadius: 3, cursor: "pointer",
-                                        border: "none", background: primaryColor, color: "#fff", fontSize: 8, lineHeight: 1,
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                                      }}
+                                      style={{ ...iconBtn, fontSize: 11 }}
                                     >📤</button>
                                   )}
                                 </div>
