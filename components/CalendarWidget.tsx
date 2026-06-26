@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, ChevronRight, Link } from "lucide-react";
+import { ChevronLeft, ChevronRight, Link, Send } from "lucide-react";
 import {
   Project,
   ProjectSegment,
@@ -156,7 +156,7 @@ export default function CalendarWidget({
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   // For rollup group props: the underlying relation property name to actually write
   const [groupWriteProp, setGroupWriteProp] = useState<string>("");
-  const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
+  const [eventPopup, setEventPopup] = useState<{ id: string; group: string; left: number; right: number; top: number; bottom: number } | null>(null);
   const [editingTitle, setEditingTitle] = useState<{ id: string; value: string } | null>(null);
   // 플래너로 보내기 모달
   const [sendPopup, setSendPopup] = useState<{ id: string; title: string } | null>(null);
@@ -1879,11 +1879,12 @@ export default function CalendarWidget({
                               const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
                               if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
-                                const cx = e.clientX, cy = e.clientY;
+                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
                                 if (clickTimer.current) clearTimeout(clickTimer.current);
                                 clickTimer.current = setTimeout(() => {
                                   clickTimer.current = null;
-                                  setEventPopup({ id: seg.id, group: seg.group ?? "", x: cx, y: cy });
+                                  setEventPopup({ id: seg.id, group: seg.group ?? "", ...anchor });
                                 }, 250);
                               }
                             }}
@@ -2110,8 +2111,8 @@ export default function CalendarWidget({
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
-                                      style={{ ...iconBtn, fontSize: 11 }}
-                                    >📤</button>
+                                      style={{ ...iconBtn, color: "#555" }}
+                                    ><Send size={11} strokeWidth={2.5} /></button>
                                   )}
                                 </div>
                               );
@@ -2212,16 +2213,26 @@ export default function CalendarWidget({
       )}
 
       {eventPopup && (() => {
-        const popupW = 150, maxH = 160;
+        const popupW = 150, margin = 8;
         const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
         const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-        const safeLeft = Math.min(Math.max(eventPopup.x, 8), vw - popupW - 8);
-        const safeTop = Math.min(Math.max(eventPopup.y + 6, 8), vh - maxH - 8);
+        // 가로: 클릭한 일정의 오른쪽(= 다음날 왼쪽)에 붙임. 넘치면 일정 왼쪽으로 플립
+        let left = eventPopup.right;
+        if (left + popupW + margin > vw) left = eventPopup.left - popupW;
+        left = Math.min(Math.max(left, margin), vw - popupW - margin);
+        // 세로: 기본은 날짜(일정) 위부터 아래로 채움. 아래 공간이 좁고 위가 더 넓으면 위로 자라 날짜를 덮음
+        const belowSpace = vh - eventPopup.top - margin;
+        const aboveSpace = eventPopup.bottom - margin;
+        const useAbove = belowSpace < 200 && aboveSpace > belowSpace;
+        const maxH = Math.max(120, useAbove ? aboveSpace : belowSpace);
+        const vPos: React.CSSProperties = useAbove
+          ? { bottom: vh - eventPopup.bottom }
+          : { top: eventPopup.top };
         return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
             style={{
-              position: "fixed", left: safeLeft, top: safeTop,
+              position: "fixed", left, ...vPos,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
               border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
             }}
