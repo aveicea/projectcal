@@ -31,6 +31,11 @@ type PropMap = Record<string, {
   relation?: Array<{ id: string }>;
 }>;
 
+function dbTitle(db: unknown): string {
+  const arr = (db as { title?: Array<{ plain_text?: string }> }).title ?? [];
+  return arr.map((t) => t.plain_text ?? "").join("").trim();
+}
+
 function readTitle(props: PropMap, titleProp?: string): string {
   const tp = titleProp ? props[titleProp] : undefined;
   if (tp?.type === "title" && tp.title) {
@@ -104,12 +109,34 @@ export async function POST(req: NextRequest) {
     if (!linkProp && plannerSchema[cfgLinkProp]?.type === "relation") linkProp = cfgLinkProp;
     if (!linkProp) {
       if (!parentDbId) throw new Error("상위 항목의 데이터베이스를 확인할 수 없어 관계형을 만들 수 없습니다.");
-      // 프젝칼 DB를 가리키는 양방향 관계형을 플래너 DB에 새로 생성
+      // 양방향 관계형을 새로 생성하되, 각 속성 이름은 "상대 DB 이름"으로 짓는다.
+      const pcalDb = await notion.databases.retrieve({ database_id: parentDbId });
+      const pcalName = dbTitle(pcalDb) || cfgLinkProp;       // 플래너 쪽 관계형 = 프젝칼 DB 이름
+      const plannerName = dbTitle(plannerDb) || "플래너";      // 프젝칼 쪽 동기화 속성 = 플래너 DB 이름
+      const newLinkName = plannerSchema[pcalName]?.type === "relation" ? pcalName : (plannerSchema[pcalName] ? cfgLinkProp : pcalName);
+
       await notion.databases.update({
         database_id: b.plannerDbId,
-        properties: { [cfgLinkProp]: { relation: { database_id: parentDbId, type: "dual_property", dual_property: {} } } } as never,
+        properties: { [newLinkName]: { relation: { database_id: parentDbId, type: "dual_property", dual_property: {} } } } as never,
       });
-      linkProp = cfgLinkProp;
+      linkProp = newLinkName;
+
+      // 프젝칼 쪽에 자동 생성된 동기화 관계형의 이름을 플래너 DB 이름으로 변경
+      try {
+        const pcalAfter = await notion.databases.retrieve({ database_id: parentDbId });
+        const pcalProps = pcalAfter.properties as Record<string, { type: string; relation?: { database_id?: string } }>;
+        if (!pcalProps[plannerName]) {
+          for (const [name, p] of Object.entries(pcalProps)) {
+            if (p.type === "relation" && p.relation?.database_id === b.plannerDbId) {
+              await notion.databases.update({
+                database_id: parentDbId,
+                properties: { [name]: { name: plannerName } } as never,
+              });
+              break;
+            }
+          }
+        }
+      } catch { /* 동기화 속성 이름 변경 실패는 치명적이지 않음 */ }
     }
 
     // 플래너 페이지 1개 생성 헬퍼
