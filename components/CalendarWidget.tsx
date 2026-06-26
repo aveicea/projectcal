@@ -1722,7 +1722,7 @@ export default function CalendarWidget({
                 const isColDrop = !!dragId && dropDateStr === dateStr;
 
                 return (
-                  <div key={dateStr} style={{
+                  <div key={dateStr} data-pcal-col="1" style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
                     width: dayWidth, flexShrink: 0,
                   }}>
@@ -1872,8 +1872,12 @@ export default function CalendarWidget({
                               const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
                               if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
-                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+                                const el = e.currentTarget as HTMLElement;
+                                const r = el.getBoundingClientRect();
+                                // 세로 시작은 막대가 아니라 날짜 칸(컬럼) 상단 기준으로 더 위에서 시작
+                                const col = el.closest("[data-pcal-col]") as HTMLElement | null;
+                                const colTop = col ? col.getBoundingClientRect().top : r.top;
+                                const anchor = { left: r.left, right: r.right, top: colTop, bottom: r.bottom };
                                 if (clickTimer.current) clearTimeout(clickTimer.current);
                                 clickTimer.current = setTimeout(() => {
                                   clickTimer.current = null;
