@@ -14,6 +14,8 @@ export interface Project {
   rowPos?: number;
   // 완료(줄긋기) — 연결된 플래너 항목이 모두 완료되면 true
   done?: boolean;
+  // 이미 플래너로 보냄 — 연결 관계형에 항목이 있으면 true
+  sent?: boolean;
 }
 
 export interface ProjectSegment extends Project {

@@ -15,6 +15,8 @@ interface EventConfig {
   rowProp?: string;
   // 완료(줄긋기) 속성 — 연결된 플래너 항목이 모두 완료되면 줄긋기. 롤업/수식/체크박스 지원
   doneProp?: string;
+  // 플래너 DB id — 이 DB로 연결된 관계형에 항목이 있으면 "이미 보냄(sent)"으로 표시
+  plannerDbId?: string;
 }
 
 type RollupValue =
@@ -90,10 +92,22 @@ export async function POST(req: NextRequest) {
     type RawEvent = {
       id: string; title: string; startDate: string; endDate: string;
       pageUrl: string; group?: string; relationIds?: string[]; dependsOn?: string[];
-      highlighted?: boolean; rowPos?: number; done?: boolean;
+      highlighted?: boolean; rowPos?: number; done?: boolean; sent?: boolean;
     };
 
     const rawEvents: RawEvent[] = [];
+
+    // "이미 보냄" 판정용: 프젝칼 DB에서 플래너 DB를 가리키는 관계형 속성 이름 탐지
+    let plannerLinkBackProp: string | undefined;
+    if (config.plannerDbId) {
+      try {
+        const db = await notion.databases.retrieve({ database_id: config.dbId });
+        const props = db.properties as Record<string, { type: string; relation?: { database_id?: string } }>;
+        for (const [name, p] of Object.entries(props)) {
+          if (p.type === "relation" && p.relation?.database_id === config.plannerDbId) { plannerLinkBackProp = name; break; }
+        }
+      } catch { /* 무시 — sent 미표시 */ }
+    }
 
     // 의존성(선행 작업) 속성 결정: 명시 설정이 없으면 노션이 의존성 기능을 켤 때
     // 자동 생성하는 "선행 작업"(predecessor) 관계형을 이름으로 자동 탐지한다.
@@ -193,6 +207,13 @@ export async function POST(req: NextRequest) {
       let done: boolean | undefined;
       if (config.doneProp) done = computeDone(props[config.doneProp]);
 
+      // 이미 플래너로 보냄 — 연결 관계형에 항목이 1개 이상
+      let sent: boolean | undefined;
+      if (plannerLinkBackProp) {
+        const lp = props[plannerLinkBackProp];
+        sent = lp?.type === "relation" && (lp.relation?.length ?? 0) > 0;
+      }
+
       rawEvents.push({
         id: page.id, title, startDate: eventStart, endDate: eventEnd,
         pageUrl: (page as { url?: string }).url ?? "#",
@@ -202,6 +223,7 @@ export async function POST(req: NextRequest) {
         ...(highlighted ? { highlighted } : {}),
         ...(rowPos != null ? { rowPos } : {}),
         ...(done ? { done } : {}),
+        ...(sent ? { sent } : {}),
       });
     }
 

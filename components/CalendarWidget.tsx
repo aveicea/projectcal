@@ -830,6 +830,7 @@ export default function CalendarWidget({
               ...(config.notionConfig.highlightProperty ? { highlightProp: config.notionConfig.highlightProperty } : {}),
               ...(config.notionConfig.rowProperty ? { rowProp: config.notionConfig.rowProperty } : {}),
               ...(config.notionConfig.doneProperty ? { doneProp: config.notionConfig.doneProperty } : {}),
+              ...(config.notionConfig.plannerDbId ? { plannerDbId: config.notionConfig.plannerDbId } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -1947,12 +1948,15 @@ export default function CalendarWidget({
                               return (
                                 <>
                                   {seg.isStart && (hasIncoming ? (
+                                    // 작은 ✕는 유지하되, 막대 모서리에 밀착한 넓은 투명 히트 영역으로 감싸 틈 없이 클릭 가능
                                     <div
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
-                                    >×</div>
+                                      style={{ position: "absolute", right: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e53e3e", color: "#fff", fontSize: 6, fontWeight: 600, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>×</div>
+                                    </div>
                                   ) : (
                                     <div
                                       title="선행 작업 연결"
@@ -1965,8 +1969,10 @@ export default function CalendarWidget({
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
-                                    >×</div>
+                                      style={{ position: "absolute", left: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e53e3e", color: "#fff", fontSize: 6, fontWeight: 600, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>×</div>
+                                    </div>
                                   ) : (
                                     <div
                                       title="후속 작업 연결"
@@ -2179,13 +2185,12 @@ export default function CalendarWidget({
             style={{
               position: "fixed", left: safeLeft, top: safeTop,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-              border: "1px solid #eee", padding: "4px 0", minWidth: popupW,
-              maxHeight: maxH, overflowY: "auto", zIndex: 10001,
+              border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 플래너로 보내기 — 플래너 DB가 연결된 경우에만 */}
-            {config?.notionConfig.plannerDbId && configId !== "preview" && (() => {
+            {/* 플래너로 보내기 — 플래너 DB가 연결됐고 아직 안 보낸 경우에만 */}
+            {config?.notionConfig.plannerDbId && configId !== "preview" && !projects.find((p) => p.id === eventPopup.id)?.sent && (() => {
               const cur = projects.find((p) => p.id === eventPopup.id);
               return (
                 <div
@@ -2239,6 +2244,7 @@ export default function CalendarWidget({
                 </div>
               );
             })()}
+            <div style={{ maxHeight: maxH, overflowY: "auto" }}>
             {groupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
               return (
@@ -2302,6 +2308,7 @@ export default function CalendarWidget({
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
         );
