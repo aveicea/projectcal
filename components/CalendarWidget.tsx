@@ -2084,11 +2084,10 @@ export default function CalendarWidget({
                               const showHighlight = !!config.notionConfig.highlightProperty;
                               const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
                               if (!showHighlight && !showSend) return null;
-                              const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
                               const iconBtn: React.CSSProperties = {
                                 padding: 0, border: "none", background: "transparent", cursor: "pointer",
                                 lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                                filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.35))",
+                                color: "#fff",
                               };
                               return (
                                 <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 320 }}>
@@ -2097,8 +2096,8 @@ export default function CalendarWidget({
                                       title={seg.highlighted ? "강조 해제" : "강조"}
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
-                                      style={{ ...iconBtn, color: seg.highlighted ? hl : "#bbb", fontSize: 12 }}
-                                    >{seg.highlighted ? "★" : "☆"}</button>
+                                      style={{ ...iconBtn, fontSize: 12, opacity: seg.highlighted ? 1 : 0.4 }}
+                                    >★</button>
                                   )}
                                   {showSend && (
                                     <button
@@ -2111,7 +2110,7 @@ export default function CalendarWidget({
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
-                                      style={{ ...iconBtn, color: "#555" }}
+                                      style={{ ...iconBtn }}
                                     ><Send size={11} strokeWidth={2.5} /></button>
                                   )}
                                 </div>
