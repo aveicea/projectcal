@@ -200,6 +200,8 @@ export default function CalendarWidget({
   const [showGCalPanel, setShowGCalPanel] = useState(false);
   const [syncingNotionId, setSyncingNotionId] = useState<string | null>(null);
   const [syncedIds, setSyncedIds] = useState<Set<string>>(new Set());
+  // GCal → Notion 가져오기 진행 중인 이벤트 id
+  const [importingId, setImportingId] = useState<string | null>(null);
   const [gcalUpdatingId, setGcalUpdatingId] = useState<string | null>(null);
   // Notion IDs that have a corresponding event in GCal → hide the Notion bar
   const [gcalSyncedNotionIds, setGcalSyncedNotionIds] = useState<Set<string>>(new Set());
@@ -638,6 +640,48 @@ export default function CalendarWidget({
     }
   };
 
+  // 구글 일정 → 노션으로 가져오기. 성공 시 구글 일정은 삭제하고 노션에만 남긴다.
+  const importToNotion = async (seg: AnySegment) => {
+    if (!config || configId === "preview" || !seg.gcalEventId) return;
+    setImportingId(seg.id);
+    try {
+      const res = await fetch("/api/create-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: config.notionConfig.apiKey,
+          databaseId: config.notionConfig.databaseId,
+          titleProperty: config.notionConfig.titleProperty,
+          dateProperty: config.notionConfig.dateProperty,
+          title: seg.title,
+          startDate: seg.startDate,
+          endDate: seg.endDate,
+        }),
+      });
+      const d = await res.json();
+      if (d.success && d.id) {
+        // 노션 일정 추가 (낙관적)
+        const newProj: ProjectSegment = {
+          id: d.id, title: seg.title, startDate: seg.startDate, endDate: seg.endDate,
+          color: barColors[projects.length % barColors.length] || "#FFB3BA",
+          pageUrl: `https://notion.so/${String(d.id).replace(/-/g, "")}`,
+          isStart: false, isEnd: false, duration: 0, rowIndex: 0,
+        };
+        setProjects((prev) => [...prev, newProj]);
+        // 구글 일정 삭제 → 노션에만 남김
+        setGcalProjects((prev) => prev.filter((p) => p.id !== seg.id));
+        if (gcalToken) {
+          fetch(`/api/gcal?token=${encodeURIComponent(gcalToken)}&action=delete&eventId=${encodeURIComponent(seg.gcalEventId)}&calendarId=${encodeURIComponent(seg.gcalCalendarId || "primary")}`)
+            .catch(() => { /* 노션엔 이미 생성됨 */ });
+        }
+      }
+    } catch (e) {
+      console.error("Import error:", e);
+    } finally {
+      setImportingId(null);
+    }
+  };
+
   const updateGCalEvent = async (seg: AnySegment, newStart: string, newEnd: string) => {
     if (!gcalToken || !seg.gcalEventId) return;
     setGcalUpdatingId(seg.id);
@@ -833,6 +877,24 @@ export default function CalendarWidget({
       ? prevWeekDays.length * WEEK_DAY_WIDTH + 12
       : prevDays.length * DAY_WIDTH + 12;
     bodyRef.current.scrollLeft = offset;
+  };
+
+  // 오늘 날짜로 이동: 멀리 이동한 상태여도 오늘이 포함된 달/주로 리셋 후 스크롤
+  // (새로고침했을 때 보이는 그 화면)
+  const goToToday = () => {
+    const now = new Date();
+    const ty = now.getFullYear(), tm = now.getMonth();
+    const tw = formatDate(getWeekStart(now));
+    scrolledRef.current = false;
+    if (weekView) {
+      if (weekStartStr === tw) scrollToToday();
+      else setWeekStartStr(tw);
+    } else if (centerYear === ty && centerMonth === tm) {
+      scrollToToday();
+    } else {
+      setCenterYear(ty);
+      setCenterMonth(tm);
+    }
   };
 
   const formatShortDate = (dateStr: string) => {
@@ -1335,7 +1397,7 @@ export default function CalendarWidget({
           fontWeight: "bold", letterSpacing: 0.2, flexShrink: 0,
         }}>
           <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span onClick={scrollToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <span onClick={goToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
               <Link size={12} strokeWidth={2.5} />
               {headerLabel} Timeline
             </span>
@@ -1414,6 +1476,10 @@ export default function CalendarWidget({
               minWidth: 220,
               maxWidth: 280,
               fontSize: 11,
+              // 위젯 높이 안에 맞추고, 더 길면 패널 전체를 스크롤
+              maxHeight: "calc(100% - 24px)",
+              overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
             {/* Panel header */}
@@ -1440,7 +1506,7 @@ export default function CalendarWidget({
                 {" "}불러오는 중...
               </div>
             ) : (
-              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+              <div>
                 {[...gcalCalendars].sort((a, b) => {
                   const ai = gcalCalendarOrder.indexOf(a.id);
                   const bi = gcalCalendarOrder.indexOf(b.id);
@@ -1670,7 +1736,7 @@ export default function CalendarWidget({
                     <div
                       data-pcal-header="1"
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
-                      onClick={scrollToToday}
+                      onClick={goToToday}
                     >
                       {isMonthBoundary ? (
                         <span style={{
@@ -1873,10 +1939,10 @@ export default function CalendarWidget({
                               const hasOutgoing = referencedPredIds.has(seg.id);
                               const circle: React.CSSProperties = {
                                 position: "absolute", top: "50%", transform: "translateY(-50%)",
-                                width: 12, height: 12, borderRadius: "50%", zIndex: 30, touchAction: "none",
+                                width: 8, height: 8, borderRadius: "50%", zIndex: 30, touchAction: "none",
                                 boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
                                 display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                                fontSize: 7, fontWeight: 700, lineHeight: 1,
                               };
                               return (
                                 <>
@@ -1885,13 +1951,13 @@ export default function CalendarWidget({
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, left: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="선행 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                      style={{ ...circle, left: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, left: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                   {seg.isEnd && (hasOutgoing ? (
@@ -1899,13 +1965,13 @@ export default function CalendarWidget({
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -6, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
+                                      style={{ ...circle, right: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
                                     >×</div>
                                   ) : (
                                     <div
                                       title="후속 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                      style={{ ...circle, right: -6, background: "#fff", border: `2px solid ${primaryColor}`, cursor: "crosshair" }}
+                                      style={{ ...circle, right: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
                                     />
                                   ))}
                                 </>
@@ -1977,13 +2043,13 @@ export default function CalendarWidget({
                               </span>
                             )}
 
-                            {/* Sync to GCal button (Notion events only, when GCal connected) */}
-                            {isHovered && seg.isStart && !seg.isGCal && gcalToken && configId !== "preview" && (
+                            {/* Import to Notion button (GCal events only) — 노션으로 가져오고 구글 일정은 삭제 */}
+                            {isHovered && seg.isStart && seg.isGCal && config && configId !== "preview" && (
                               <button
-                                title={syncedIds.has(seg.id) ? "Google Calendar에 추가됨" : "Google Calendar에 추가"}
+                                title="노션으로 가져오기 (구글 일정은 삭제)"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  syncToGCal(seg);
+                                  importToNotion(seg);
                                 }}
                                 style={{
                                   position: "absolute",
@@ -1992,7 +2058,7 @@ export default function CalendarWidget({
                                   transform: "translateY(-50%)",
                                   fontSize: 7,
                                   padding: "1px 4px",
-                                  background: syncedIds.has(seg.id) ? "#34A853" : primaryColor,
+                                  background: primaryColor,
                                   color: "white",
                                   border: "none",
                                   borderRadius: 3,
@@ -2003,7 +2069,7 @@ export default function CalendarWidget({
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                {syncingNotionId === seg.id ? "..." : syncedIds.has(seg.id) ? "✓" : "→G"}
+                                {importingId === seg.id ? "..." : "→N"}
                               </button>
                             )}
                           </div>
