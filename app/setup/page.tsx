@@ -103,6 +103,8 @@ function OnboardingPageInner() {
   // 플래너 연결: 같은(또는 별도) 토큰으로 DB 목록 불러와 선택 + 속성 자동 감지
   const [plannerDatabases, setPlannerDatabases] = useState<{ id: string; title: string }[]>([]);
   const [plannerDbLoading, setPlannerDbLoading] = useState(false);
+  // 선택한 플래너 DB의 속성 목록(타입별) — 토글 안 드롭다운 채우기용
+  const [plannerSchema, setPlannerSchema] = useState<{ titles: string[]; dates: string[]; relations: string[] }>({ titles: [], dates: [], relations: [] });
   const [groupableProperties, setGroupableProperties] = useState<{ name: string; type: string }[]>([]);
   const [checkboxProperties, setCheckboxProperties] = useState<string[]>([]);
   const [rowProperties, setRowProperties] = useState<{ name: string; type: string }[]>([]);
@@ -524,6 +526,12 @@ function OnboardingPageInner() {
       const plannerRelations: string[] = (data.groupableProperties ?? [])
         .filter((p: { type: string }) => p.type === "relation")
         .map((p: { name: string }) => p.name);
+      // 토글 드롭다운용 속성 목록 저장
+      setPlannerSchema({
+        titles: (data.titleProperties ?? []).map((p: { name: string }) => p.name),
+        dates: data.dateProperties ?? [],
+        relations: plannerRelations,
+      });
 
       // 프젝칼(메인 DB) 쪽 속성 — 이미 분석된 shared 상태에서 자동 매칭
       const mainRelations = groupableProperties.filter((p) => p.type === "relation").map((p) => p.name);
@@ -545,6 +553,31 @@ function OnboardingPageInner() {
       }));
     } catch { /* silent — 사용자가 수동 보정 가능 */ }
   };
+
+  // 저장된 설정 불러올 때(plannerDbId가 이미 있음) 토글 드롭다운용 스키마를 조용히 로드
+  useEffect(() => {
+    const dbId = settings.plannerDbId.trim();
+    const token = settings.plannerToken.trim() || settings.apiKey.trim();
+    if (!dbId || !token) return;
+    if (plannerSchema.titles.length > 0 || plannerSchema.relations.length > 0) return;
+    fetch("/api/analyze-database", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: token, databaseId: dbId }),
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.success && j.data) {
+          setPlannerSchema({
+            titles: (j.data.titleProperties ?? []).map((p: { name: string }) => p.name),
+            dates: j.data.dateProperties ?? [],
+            relations: (j.data.groupableProperties ?? []).filter((p: { type: string }) => p.type === "relation").map((p: { name: string }) => p.name),
+          });
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.plannerDbId]);
 
   // ── Google Calendar ───────────────────────────────────────────────────────
 
@@ -1373,21 +1406,45 @@ function OnboardingPageInner() {
                   <details style={{ marginTop: 14 }}>
                     <summary style={{ fontSize: 12, color: "#3A6EA5", cursor: "pointer", fontWeight: 600 }}>속성 이름 (기본값 사용 권장)</summary>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
-                      {([
-                        ["plannerTitleProp", "플래너 제목"],
-                        ["plannerDateProp", "플래너 날짜"],
-                        ["plannerBookProp", "플래너 책"],
-                        ["plannerLinkProp", "플래너→프젝칼 관계형"],
-                        ["parentRelProp", "프젝칼 상위 항목 관계형"],
-                        ["bookProperty", "프젝칼 책 관계형"],
-                      ] as [keyof Settings, string][]).map(([key, label]) => (
-                        <div key={key}>
-                          <label style={{ fontSize: 11, color: "#999", display: "block", marginBottom: 4 }}>{label}</label>
-                          <input className="soft-input" value={settings[key] as string}
-                            onChange={(e) => update(key, e.target.value as never)}
-                            style={{ marginBottom: 0, fontSize: 12, padding: 10 }} />
-                        </div>
-                      ))}
+                      {(() => {
+                        const mainRelations = groupableProperties.filter((p) => p.type === "relation").map((p) => p.name);
+                        const optsFor: Record<string, string[]> = {
+                          plannerTitleProp: plannerSchema.titles,
+                          plannerDateProp: plannerSchema.dates,
+                          plannerBookProp: plannerSchema.relations,
+                          plannerLinkProp: plannerSchema.relations,
+                          parentRelProp: mainRelations,
+                          bookProperty: mainRelations,
+                        };
+                        return ([
+                          ["plannerTitleProp", "플래너 제목"],
+                          ["plannerDateProp", "플래너 날짜"],
+                          ["plannerBookProp", "플래너 책"],
+                          ["plannerLinkProp", "플래너→프젝칼 관계형"],
+                          ["parentRelProp", "프젝칼 상위 항목 관계형"],
+                          ["bookProperty", "프젝칼 책 관계형"],
+                        ] as [keyof Settings, string][]).map(([key, label]) => {
+                          const opts = optsFor[key] ?? [];
+                          const cur = settings[key] as string;
+                          return (
+                            <div key={key}>
+                              <label style={{ fontSize: 11, color: "#999", display: "block", marginBottom: 4 }}>{label}</label>
+                              {opts.length > 0 ? (
+                                <select className="soft-select" value={cur}
+                                  onChange={(e) => update(key, e.target.value as never)}
+                                  style={{ marginBottom: 0, fontSize: 12, padding: 10 }}>
+                                  {cur && !opts.includes(cur) && <option value={cur}>{cur}</option>}
+                                  {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              ) : (
+                                <input className="soft-input" value={cur}
+                                  onChange={(e) => update(key, e.target.value as never)}
+                                  style={{ marginBottom: 0, fontSize: 12, padding: 10 }} />
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </details>
                 )}
