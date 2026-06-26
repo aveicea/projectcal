@@ -1022,17 +1022,26 @@ export default function CalendarWidget({
       .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
     for (const P of parents) {
       const pRow = effectiveRowMap.get(P.id) ?? 0;
-      const kids = [...(childrenByParent.get(P.id) ?? [])].sort((a, b) => a.startDate.localeCompare(b.startDate));
+      const kids = [...(childrenByParent.get(P.id) ?? [])].sort((a, b) =>
+        a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
       const kidIds = new Set(kids.map((k) => k.id));
-      const n = kids.length;
-      // pRow 아래의 다른 항목들을 n칸 밀어 내려 자리를 비움
+      // 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄)
+      const rowEnds: string[] = [];
+      const kidRow = new Map<string, number>();
+      for (const c of kids) {
+        let r = rowEnds.findIndex((end) => c.startDate > end);
+        if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
+        else rowEnds[r] = c.endDate;
+        kidRow.set(c.id, r);
+      }
+      const n = rowEnds.length; // 하위가 차지하는 줄 수
+      // pRow 아래의 다른 항목들을 n칸 밀어 내려 하위 블록 자리를 비움
       for (const q of allDisplayProjects) {
         if (q.id === P.id || kidIds.has(q.id)) continue;
         const qr = effectiveRowMap.get(q.id);
         if (qr != null && qr > pRow) effectiveRowMap.set(q.id, qr + n);
       }
-      // 하위 항목을 상위 바로 아래 줄에 연속 배치
-      kids.forEach((c, i) => effectiveRowMap.set(c.id, pRow + 1 + i));
+      kids.forEach((c) => effectiveRowMap.set(c.id, pRow + 1 + (kidRow.get(c.id) ?? 0)));
     }
   }
 
