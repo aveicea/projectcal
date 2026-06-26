@@ -150,8 +150,9 @@ export default function CalendarWidget({
   const [groupPropType, setGroupPropType] = useState<string>("select");
   // 설정에서 지정한 화이트리스트가 있으면 그 항목만 팝업에 표시
   const groupFilter = config?.notionConfig.groupOptionFilter;
+  // 필터가 있으면 그 "순서대로" 표시 (설정에서 정한 순서)
   const visibleGroupOptions = groupFilter && groupFilter.length > 0
-    ? groupOptions.filter((o) => groupFilter.includes(o))
+    ? groupFilter.filter((o) => groupOptions.includes(o))
     : groupOptions;
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   // For rollup group props: the underlying relation property name to actually write
@@ -828,12 +829,19 @@ export default function CalendarWidget({
 
     const applyGroupColors = (segs: ReturnType<typeof assignColors>) => {
       if (Object.keys(groupColorOverrides).length === 0) return segs;
-      return segs.map((p) => ({
-        ...p,
-        color: (p.group && groupColorOverrides[p.group])
-          || (!p.group?.trim() && groupColorOverrides["__none__"])
-          || p.color,
-      }));
+      const pick = (g?: string): string | undefined => {
+        if (g && g.trim()) {
+          if (groupColorOverrides[g]) return groupColorOverrides[g];
+          const t = g.trim();
+          if (groupColorOverrides[t]) return groupColorOverrides[t];
+          // 다중 값("책A, 책B")이면 첫 값으로 매칭
+          const first = t.split(",")[0].trim();
+          if (first && groupColorOverrides[first]) return groupColorOverrides[first];
+          return undefined;
+        }
+        return groupColorOverrides["__none__"];
+      };
+      return segs.map((p) => ({ ...p, color: pick(p.group) || p.color }));
     };
 
     if (configId === "preview") {
@@ -985,6 +993,24 @@ export default function CalendarWidget({
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
+
+  // 두 줄 보기: 저장된 줄 위치/복원으로 겹침이 생겨도 절대 겹치지 않게 해소(아래로 밀기).
+  // 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄.
+  if (multiRow && !hasDeps) {
+    const occ = new Map<number, Array<{ s: string; e: string }>>();
+    const conflict = (r: number, s: string, e: string) =>
+      (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
+    const ordered = [...allDisplayProjects].sort((a, b) =>
+      ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
+      a.startDate.localeCompare(b.startDate));
+    for (const p of ordered) {
+      let r = effectiveRowMap.get(p.id) ?? 0;
+      while (conflict(r, p.startDate, p.endDate)) r++;
+      effectiveRowMap.set(p.id, r);
+      if (!occ.has(r)) occ.set(r, []);
+      occ.get(r)!.push({ s: p.startDate, e: p.endDate });
+    }
+  }
 
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
@@ -2338,7 +2364,7 @@ export default function CalendarWidget({
           </div>
         )}
 
-        <button onClick={() => { setRowOverrides(new Map()); safeStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
+        <button onClick={() => { fetchProjects(); }} aria-label="Refresh"
           style={{
             cursor: "pointer", color: primaryColor, display: "flex",
             justifyContent: "center", alignItems: "center", transition: "all .2s",

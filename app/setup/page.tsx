@@ -1195,10 +1195,34 @@ function OnboardingPageInner() {
                       })}
                     </div>
                     {settings.groupOptionFilter.length > 0 && (
-                      <button type="button" onClick={() => update("groupOptionFilter", [])}
-                        style={{ marginTop: 8, fontSize: 11, color: "#aaa", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
-                        전체 표시로 초기화
-                      </button>
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 11, color: "#999", marginBottom: 4 }}>표시 순서 (위 = 먼저)</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {settings.groupOptionFilter.map((opt, i) => {
+                            const move = (delta: number) => {
+                              const arr = [...settings.groupOptionFilter];
+                              const j = i + delta;
+                              if (j < 0 || j >= arr.length) return;
+                              [arr[i], arr[j]] = [arr[j], arr[i]];
+                              update("groupOptionFilter", arr);
+                            };
+                            return (
+                              <div key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, background: "#fff", border: "1px solid #eee", borderRadius: 8, padding: "4px 8px" }}>
+                                <span style={{ color: "#bbb", width: 16, textAlign: "center" }}>{i + 1}</span>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#555" }}>{opt || "(빈 값)"}</span>
+                                <button type="button" onClick={() => move(-1)} disabled={i === 0}
+                                  style={{ border: "none", background: "none", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#ddd" : "#888", fontSize: 13 }}>↑</button>
+                                <button type="button" onClick={() => move(1)} disabled={i === settings.groupOptionFilter.length - 1}
+                                  style={{ border: "none", background: "none", cursor: i === settings.groupOptionFilter.length - 1 ? "default" : "pointer", color: i === settings.groupOptionFilter.length - 1 ? "#ddd" : "#888", fontSize: 13 }}>↓</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button type="button" onClick={() => update("groupOptionFilter", [])}
+                          style={{ marginTop: 8, fontSize: 11, color: "#aaa", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+                          전체 표시로 초기화
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
