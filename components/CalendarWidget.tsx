@@ -1832,7 +1832,11 @@ export default function CalendarWidget({
         )}
 
         {loading ? (
-          <div style={{ textAlign: "center", padding: 12, color: "#888", fontSize: 11 }}>Loading...</div>
+          <div style={{
+            textAlign: "center", padding: "40px 12px", color: "#aaa", fontSize: 11,
+            // 로딩 중에도 달력 가로 폭을 유지(작게 줄어들지 않게)
+            width: displayDays.length * dayWidth + 24, maxWidth: "100%", boxSizing: "border-box",
+          }}>Loading...</div>
         ) : (
           <div
             ref={bodyRef}
