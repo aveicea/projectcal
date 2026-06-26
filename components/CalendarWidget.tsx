@@ -150,8 +150,9 @@ export default function CalendarWidget({
   const [groupPropType, setGroupPropType] = useState<string>("select");
   // 설정에서 지정한 화이트리스트가 있으면 그 항목만 팝업에 표시
   const groupFilter = config?.notionConfig.groupOptionFilter;
+  // 필터가 있으면 그 "순서대로" 표시 (설정에서 정한 순서)
   const visibleGroupOptions = groupFilter && groupFilter.length > 0
-    ? groupOptions.filter((o) => groupFilter.includes(o))
+    ? groupFilter.filter((o) => groupOptions.includes(o))
     : groupOptions;
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   // For rollup group props: the underlying relation property name to actually write
@@ -826,19 +827,10 @@ export default function CalendarWidget({
     if (!hasLoadedOnce.current) setLoading(true);
     setError(null);
 
-    const applyGroupColors = (segs: ReturnType<typeof assignColors>) => {
-      if (Object.keys(groupColorOverrides).length === 0) return segs;
-      return segs.map((p) => ({
-        ...p,
-        color: (p.group && groupColorOverrides[p.group])
-          || (!p.group?.trim() && groupColorOverrides["__none__"])
-          || p.color,
-      }));
-    };
-
+    // 그룹(책)별 색은 렌더 시점에 적용한다(아래 effectiveNotionProjects). 여기서는 기본 색만 부여.
     if (configId === "preview") {
       const raw = previewProjects ?? getPreviewProjects();
-      setProjects(applyGroupColors(assignColors(raw, barColors)));
+      setProjects(assignColors(raw, barColors));
       setLoading(false);
       return;
     }
@@ -868,7 +860,7 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? applyGroupColors(assignColors(json.data, barColors)) : []);
+        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
         if (json.dependsProp) setDetectedDependsProp(json.dependsProp as string);
       } catch (e) {
         console.error(e);
@@ -883,7 +875,7 @@ export default function CalendarWidget({
 
     setLoading(false);
     hasLoadedOnce.current = true;
-  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects, groupColorOverrides]);
+  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
@@ -948,15 +940,33 @@ export default function CalendarWidget({
   // Apply date overrides to both Notion and GCal events
   // Hide Notion events that have been synced to GCal (show GCal version instead)
   // 하위 항목(parentId 있음)은 부모가 펼쳐진 경우에만 막대로 렌더
+  // 그룹(책)별 색을 렌더 시점에 적용 — 다중 값/공백 차이도 매칭
+  const pickGroupColor = (g?: string): string | undefined => {
+    if (Object.keys(groupColorOverrides).length === 0) return undefined;
+    if (g && g.trim()) {
+      const t = g.trim();
+      if (groupColorOverrides[g]) return groupColorOverrides[g];
+      if (groupColorOverrides[t]) return groupColorOverrides[t];
+      const first = t.split(",")[0].trim();
+      if (first && groupColorOverrides[first]) return groupColorOverrides[first];
+      return undefined;
+    }
+    return groupColorOverrides["__none__"];
+  };
+
   const effectiveNotionProjects: AnySegment[] = projects
     .filter((p) => !gcalSyncedNotionIds.has(p.id) && (!p.parentId || expandedParents.has(p.parentId)))
     .map((p) => {
       const o = dateOverrides.get(p.id);
       let seg: AnySegment = o ? { ...p, ...o } : p;
-      // 하위 항목은 상위와 같은 색을 약간 연하게
+      // 하위 항목은 상위(그룹 색 반영) 색을 약간 연하게, 상위/일반은 그룹 색 적용
       if (p.parentId) {
-        const parentColor = projects.find((pp) => pp.id === p.parentId)?.color;
+        const parent = projects.find((pp) => pp.id === p.parentId);
+        const parentColor = (parent && pickGroupColor(parent.group)) || parent?.color;
         if (parentColor) seg = { ...seg, color: lightenColor(parentColor, 0.35) };
+      } else {
+        const gc = pickGroupColor(p.group);
+        if (gc) seg = { ...seg, color: gc };
       }
       return seg;
     });
@@ -977,14 +987,54 @@ export default function CalendarWidget({
     ? assignRowsWithDeps(allDisplayProjects as ProjectSegment[])
     : assignRows(allDisplayProjects as ProjectSegment[], multiRow);
   const effectiveRowMap = new Map(rowMap);
-  // Notion "행 위치" 속성에 저장된 줄 위치를 먼저 반영 (복원)
+  // Notion "행 위치" 속성에 저장된 줄 위치를 먼저 반영 (복원) — 단, 하위 항목은 줄 속성 무시
   allDisplayProjects.forEach((p) => {
+    if (p.parentId) return;
     if (p.rowPos != null && effectiveRowMap.has(p.id)) effectiveRowMap.set(p.id, p.rowPos);
   });
-  // 이번 세션 드래그로 바뀐 줄 위치를 그 위에 반영
+  // 이번 세션 드래그로 바뀐 줄 위치를 그 위에 반영 (드래그가 우선)
   rowOverrides.forEach((row, id) => {
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
+
+  // 펼친 상위 항목: 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
+  // 단, 사용자가 직접 드래그한 하위는 그 위치를 존중. 전역으로 밀지 않고 겹침은 아래 해소 패스가 처리.
+  if (expandedParents.size > 0) {
+    const parents = allDisplayProjects
+      .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
+      .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
+    for (const P of parents) {
+      const pRow = effectiveRowMap.get(P.id) ?? 0;
+      const kids = [...(childrenByParent.get(P.id) ?? [])]
+        .filter((k) => !rowOverrides.has(k.id))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+      const rowEnds: string[] = [];
+      for (const c of kids) {
+        let r = rowEnds.findIndex((end) => c.startDate > end);
+        if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
+        else rowEnds[r] = c.endDate;
+        effectiveRowMap.set(c.id, pRow + 1 + r);
+      }
+    }
+  }
+
+  // 겹침 해소: 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄(절대 겹치지 않게).
+  // 두 줄 보기이거나 펼친 상위 항목이 있을 때 적용.
+  if ((multiRow || expandedParents.size > 0) && !hasDeps) {
+    const occ = new Map<number, Array<{ s: string; e: string }>>();
+    const conflict = (r: number, s: string, e: string) =>
+      (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
+    const ordered = [...allDisplayProjects].sort((a, b) =>
+      ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
+      a.startDate.localeCompare(b.startDate));
+    for (const p of ordered) {
+      let r = effectiveRowMap.get(p.id) ?? 0;
+      while (conflict(r, p.startDate, p.endDate)) r++;
+      effectiveRowMap.set(p.id, r);
+      if (!occ.has(r)) occ.set(r, []);
+      occ.get(r)!.push({ s: p.startDate, e: p.endDate });
+    }
+  }
 
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
@@ -2338,7 +2388,7 @@ export default function CalendarWidget({
           </div>
         )}
 
-        <button onClick={() => { setRowOverrides(new Map()); safeStorage.removeItem("pcal_row_overrides"); fetchProjects(); }} aria-label="Refresh"
+        <button onClick={() => { fetchProjects(); }} aria-label="Refresh"
           style={{
             cursor: "pointer", color: primaryColor, display: "flex",
             justifyContent: "center", alignItems: "center", transition: "all .2s",
