@@ -952,7 +952,13 @@ export default function CalendarWidget({
     .filter((p) => !gcalSyncedNotionIds.has(p.id) && (!p.parentId || expandedParents.has(p.parentId)))
     .map((p) => {
       const o = dateOverrides.get(p.id);
-      return o ? { ...p, ...o } : p;
+      let seg: AnySegment = o ? { ...p, ...o } : p;
+      // 하위 항목은 상위와 같은 색을 약간 연하게
+      if (p.parentId) {
+        const parentColor = projects.find((pp) => pp.id === p.parentId)?.color;
+        if (parentColor) seg = { ...seg, color: lightenColor(parentColor, 0.35) };
+      }
+      return seg;
     });
 
   const effectiveGCalProjects: AnySegment[] = gcalProjects.map((p) => {
@@ -1075,6 +1081,23 @@ export default function CalendarWidget({
         propType: "date",
       }),
     }).catch(() => { /* keep optimistic value */ });
+
+    // 이미 플래너로 보낸 항목이면, 연결된 미완료 플래너 항목의 날짜도 동기화
+    const nc = config.notionConfig;
+    if (nc.plannerDbId && projects.find((p) => p.id === pageId)?.sent) {
+      fetch("/api/sync-planner-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: nc.plannerToken || nc.apiKey,
+          plannerDbId: nc.plannerDbId,
+          parentPageId: pageId,
+          start: startDate,
+          end: endDate,
+          plannerDateProp: nc.plannerDateProp,
+        }),
+      }).catch(() => { /* best-effort */ });
+    }
   };
 
   const persistNotionRow = (pageId: string, row: number) => {
