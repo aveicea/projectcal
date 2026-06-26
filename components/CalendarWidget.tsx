@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { ChevronLeft, ChevronRight, Link, Send } from "lucide-react";
 import {
   Project,
@@ -160,8 +160,28 @@ export default function CalendarWidget({
   const [plannerItems, setPlannerItems] = useState<{ id: string; title: string; done: boolean }[]>([]);
   const [plannerItemsLoading, setPlannerItemsLoading] = useState(false);
   const [selectedPlannerIds, setSelectedPlannerIds] = useState<Set<string>>(new Set());
+  // 그룹 팝업: 위젯 본문 영역 안에서 항목 기준 세로 중앙 정렬 + 경계 클램프 (측정 기반)
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [popupPos, setPopupPos] = useState<{ top: number; maxH: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
+
+  // 그룹 팝업 세로 위치: 위젯 본문(헤더 아래~맨 밑) 영역 안에서 항목 중심으로 중앙 정렬,
+  // 위(헤더)나 아래(밑) 공간이 부족하면 그 경계로 밀어 넣는다.
+  useLayoutEffect(() => {
+    if (!eventPopup) { setPopupPos(null); return; }
+    if (!popupRef.current || !bodyRef.current) return;
+    const body = bodyRef.current.getBoundingClientRect();
+    const maxH = Math.max(120, body.height);
+    const natural = popupRef.current.scrollHeight;
+    const h = Math.min(natural, maxH);
+    const center = (eventPopup.top + eventPopup.bottom) / 2;
+    let top = center - h / 2;
+    if (top + h > body.bottom) top = body.bottom - h; // 밑 공간 부족 → 위로
+    if (top < body.top) top = body.top;               // 헤더 공간 부족 → 아래로
+    setPopupPos({ top, maxH });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventPopup]);
   // Pointer-based drag (works on mouse + touch). Replaces native HTML5 DnD.
   const pdrag = useRef<{
     mode: "move" | "resize-start" | "resize-end" | "link";
@@ -2207,28 +2227,22 @@ export default function CalendarWidget({
       {eventPopup && (() => {
         const popupW = 150, margin = 8;
         const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-        const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
         // 가로: 클릭한 일정의 오른쪽(= 다음날 왼쪽)에 붙임. 넘치면 일정 왼쪽으로 플립
         let left = eventPopup.right;
         if (left + popupW + margin > vw) left = eventPopup.left - popupW;
         left = Math.min(Math.max(left, margin), vw - popupW - margin);
-        // 세로: 항목(막대) 위에서 시작해 아래로 자라되, 너무 밑으로 가지 않게 최대 높이를 제한(넘치면 스크롤).
-        // 아래 공간이 너무 좁으면 위로 자라도록 폴백.
-        const cap = 220;
-        const aboveSpace = eventPopup.bottom - margin;
-        const belowSpace = vh - eventPopup.top - margin;
-        const growDown = belowSpace >= 140 || belowSpace >= aboveSpace;
-        const maxH = Math.min(cap, Math.max(120, growDown ? belowSpace : aboveSpace));
-        const vPos: React.CSSProperties = growDown
-          ? { top: eventPopup.top }
-          : { bottom: vh - eventPopup.bottom };
+        // 세로 위치/높이는 useLayoutEffect(popupPos)에서 위젯 본문 영역 기준으로 계산. 측정 전에는 숨김.
+        const top = popupPos?.top ?? eventPopup.top;
+        const maxH = popupPos?.maxH ?? 9999;
         return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
+            ref={popupRef}
             style={{
-              position: "fixed", left, ...vPos,
+              position: "fixed", left, top,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
               border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
+              opacity: popupPos ? 1 : 0,
             }}
             onClick={(e) => e.stopPropagation()}
           >
