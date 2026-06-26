@@ -827,26 +827,10 @@ export default function CalendarWidget({
     if (!hasLoadedOnce.current) setLoading(true);
     setError(null);
 
-    const applyGroupColors = (segs: ReturnType<typeof assignColors>) => {
-      if (Object.keys(groupColorOverrides).length === 0) return segs;
-      const pick = (g?: string): string | undefined => {
-        if (g && g.trim()) {
-          if (groupColorOverrides[g]) return groupColorOverrides[g];
-          const t = g.trim();
-          if (groupColorOverrides[t]) return groupColorOverrides[t];
-          // 다중 값("책A, 책B")이면 첫 값으로 매칭
-          const first = t.split(",")[0].trim();
-          if (first && groupColorOverrides[first]) return groupColorOverrides[first];
-          return undefined;
-        }
-        return groupColorOverrides["__none__"];
-      };
-      return segs.map((p) => ({ ...p, color: pick(p.group) || p.color }));
-    };
-
+    // 그룹(책)별 색은 렌더 시점에 적용한다(아래 effectiveNotionProjects). 여기서는 기본 색만 부여.
     if (configId === "preview") {
       const raw = previewProjects ?? getPreviewProjects();
-      setProjects(applyGroupColors(assignColors(raw, barColors)));
+      setProjects(assignColors(raw, barColors));
       setLoading(false);
       return;
     }
@@ -876,7 +860,7 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? applyGroupColors(assignColors(json.data, barColors)) : []);
+        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
         if (json.dependsProp) setDetectedDependsProp(json.dependsProp as string);
       } catch (e) {
         console.error(e);
@@ -891,7 +875,7 @@ export default function CalendarWidget({
 
     setLoading(false);
     hasLoadedOnce.current = true;
-  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects, groupColorOverrides]);
+  }, [configId, config, centerYear, centerMonth, fetchStart, fetchEnd, barColors, previewProjects, getPreviewProjects]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
@@ -956,15 +940,33 @@ export default function CalendarWidget({
   // Apply date overrides to both Notion and GCal events
   // Hide Notion events that have been synced to GCal (show GCal version instead)
   // 하위 항목(parentId 있음)은 부모가 펼쳐진 경우에만 막대로 렌더
+  // 그룹(책)별 색을 렌더 시점에 적용 — 다중 값/공백 차이도 매칭
+  const pickGroupColor = (g?: string): string | undefined => {
+    if (Object.keys(groupColorOverrides).length === 0) return undefined;
+    if (g && g.trim()) {
+      const t = g.trim();
+      if (groupColorOverrides[g]) return groupColorOverrides[g];
+      if (groupColorOverrides[t]) return groupColorOverrides[t];
+      const first = t.split(",")[0].trim();
+      if (first && groupColorOverrides[first]) return groupColorOverrides[first];
+      return undefined;
+    }
+    return groupColorOverrides["__none__"];
+  };
+
   const effectiveNotionProjects: AnySegment[] = projects
     .filter((p) => !gcalSyncedNotionIds.has(p.id) && (!p.parentId || expandedParents.has(p.parentId)))
     .map((p) => {
       const o = dateOverrides.get(p.id);
       let seg: AnySegment = o ? { ...p, ...o } : p;
-      // 하위 항목은 상위와 같은 색을 약간 연하게
+      // 하위 항목은 상위(그룹 색 반영) 색을 약간 연하게, 상위/일반은 그룹 색 적용
       if (p.parentId) {
-        const parentColor = projects.find((pp) => pp.id === p.parentId)?.color;
+        const parent = projects.find((pp) => pp.id === p.parentId);
+        const parentColor = (parent && pickGroupColor(parent.group)) || parent?.color;
         if (parentColor) seg = { ...seg, color: lightenColor(parentColor, 0.35) };
+      } else {
+        const gc = pickGroupColor(p.group);
+        if (gc) seg = { ...seg, color: gc };
       }
       return seg;
     });
