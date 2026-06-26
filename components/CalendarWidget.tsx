@@ -1039,7 +1039,8 @@ export default function CalendarWidget({
 
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
-  const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
+  // 드래그 중엔 맨 아래에 빈 줄 하나를 더 둬서 "새 줄"로 떨어뜨릴 수 있게 한다.
+  const totalRows = Math.max(dragId ? maxRow + 1 : maxRow, 1);
 
   // ── Dependency connector lines (선행 → 후속) ─────────────────────────────────
   // Geometry mirrors the day-grid: each column is `dayWidth` wide, the grid has
