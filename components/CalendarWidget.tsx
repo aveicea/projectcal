@@ -1098,6 +1098,28 @@ export default function CalendarWidget({
         }),
       }).catch(() => { /* best-effort */ });
     }
+
+    // 이동한 항목이 하위 항목이면 상위 항목 날짜를 하위들 전체를 포함하도록 갱신(프젝칼 날짜만)
+    const moved = projects.find((p) => p.id === pageId);
+    if (moved?.parentId) {
+      const kids = projects.filter((p) => p.parentId === moved.parentId);
+      let minS = startDate, maxE = endDate;
+      for (const k of kids) {
+        const eff = k.id === pageId ? { startDate, endDate } : (dateOverrides.get(k.id) ?? { startDate: k.startDate, endDate: k.endDate });
+        if (eff.startDate < minS) minS = eff.startDate;
+        if (eff.endDate > maxE) maxE = eff.endDate;
+      }
+      const parent = projects.find((p) => p.id === moved.parentId);
+      const pEff = parent ? (dateOverrides.get(parent.id) ?? { startDate: parent.startDate, endDate: parent.endDate }) : null;
+      if (parent && pEff && (pEff.startDate !== minS || pEff.endDate !== maxE)) {
+        setDateOverrides((prev) => { const n = new Map(prev); n.set(parent.id, { startDate: minS, endDate: maxE }); return n; });
+        fetch("/api/update-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: nc.apiKey, pageId: parent.id, property: nc.dateProperty, value: { start: minS, end: maxE }, propType: "date" }),
+        }).catch(() => { /* keep optimistic */ });
+      }
+    }
   };
 
   const persistNotionRow = (pageId: string, row: number) => {
