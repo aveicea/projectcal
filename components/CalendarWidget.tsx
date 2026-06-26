@@ -1877,8 +1877,7 @@ export default function CalendarWidget({
                               if (Date.now() - lastDragEnd.current < 300) return;
                               // 더블클릭이면 팝업을 열지 않도록 지연 후 실행 (dblclick에서 취소)
                               const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
-                              const hasHighlight = !!config?.notionConfig.highlightProperty;
-                              if (!seg.isGCal && seg.isStart && (hasGroup || hasHighlight)) {
+                              if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
                                 const cx = e.clientX, cy = e.clientY;
                                 if (clickTimer.current) clearTimeout(clickTimer.current);
@@ -2078,6 +2077,52 @@ export default function CalendarWidget({
                                 {importingId === seg.id ? "..." : "→N"}
                               </button>
                             )}
+
+                            {/* 막대 위에 떠 있는 작은 버튼들: 강조 토글 + 플래너 보내기 (Notion 시작 세그먼트, 호버) */}
+                            {isHovered && seg.isStart && !seg.isGCal && config && configId !== "preview" && !isDragging && (() => {
+                              const showHighlight = !!config.notionConfig.highlightProperty;
+                              const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
+                              if (!showHighlight && !showSend) return null;
+                              const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
+                              return (
+                                <div style={{ position: "absolute", left: 2, top: -15, display: "flex", gap: 3, zIndex: 320 }}>
+                                  {showHighlight && (
+                                    <button
+                                      title={seg.highlighted ? "강조 해제" : "강조"}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
+                                      style={{
+                                        width: 14, height: 14, padding: 0, borderRadius: 3, cursor: "pointer",
+                                        border: `1px solid ${seg.highlighted ? hl : "#ccc"}`,
+                                        background: seg.highlighted ? hl : "#fff",
+                                        color: seg.highlighted ? "#fff" : "#999", fontSize: 9, lineHeight: 1,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+                                      }}
+                                    >★</button>
+                                  )}
+                                  {showSend && (
+                                    <button
+                                      title="플래너로 보내기"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSendPopup({ id: seg.id, title: seg.title });
+                                        setSendText(""); setSendState("idle"); setSendError("");
+                                        setSelectedPlannerIds(new Set()); setPlannerItems([]);
+                                        loadPlannerItems();
+                                      }}
+                                      style={{
+                                        width: 14, height: 14, padding: 0, borderRadius: 3, cursor: "pointer",
+                                        border: "none", background: primaryColor, color: "#fff", fontSize: 8, lineHeight: 1,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+                                      }}
+                                    >📤</button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -2189,61 +2234,6 @@ export default function CalendarWidget({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 플래너로 보내기 — 플래너 DB가 연결됐고 아직 안 보낸 경우에만 */}
-            {config?.notionConfig.plannerDbId && configId !== "preview" && !projects.find((p) => p.id === eventPopup.id)?.sent && (() => {
-              const cur = projects.find((p) => p.id === eventPopup.id);
-              return (
-                <div
-                  onClick={() => {
-                    setSendPopup({ id: eventPopup.id, title: cur?.title ?? "" });
-                    setSendText("");
-                    setSendState("idle");
-                    setSendError("");
-                    setSelectedPlannerIds(new Set());
-                    setPlannerItems([]);
-                    loadPlannerItems();
-                    setEventPopup(null);
-                  }}
-                  style={{
-                    padding: "6px 10px", fontSize: 11, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8,
-                    borderBottom: "1px solid #eee", fontWeight: 600, color: "#444",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                >
-                  📤 플래너로 보내기
-                </div>
-              );
-            })()}
-            {/* 강조(중요) 체크 — 맨 위, 노션에 저장 */}
-            {config?.notionConfig.highlightProperty && (() => {
-              const cur = projects.find((p) => p.id === eventPopup.id);
-              const on = !!cur?.highlighted;
-              const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
-              return (
-                <div
-                  onClick={() => toggleHighlight(eventPopup.id, !on)}
-                  style={{
-                    padding: "6px 10px", fontSize: 11, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8,
-                    borderBottom: groupOptions.length > 0 ? "1px solid #eee" : "none",
-                    fontWeight: 600, color: "#444",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                >
-                  <div style={{
-                    width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                    border: `1.5px solid ${on ? hl : "#ccc"}`, background: on ? hl : "transparent",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
-                  </div>
-                  ⭐ 강조
-                </div>
-              );
-            })()}
             <div style={{ maxHeight: maxH, overflowY: "auto" }}>
             {groupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
