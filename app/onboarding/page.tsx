@@ -36,6 +36,7 @@ interface Settings {
   dateProperty: string;
   titleProperty: string;
   groupProperty: string;
+  groupOptionFilter: string[];
   dependencyProperty: string;
   highlightProperty: string;
   highlightBorderColor: string;
@@ -166,6 +167,7 @@ function OnboardingPageInner() {
           dateProperty: (json.dateProp as string) ?? prev.dateProperty,
           titleProperty: (json.titleProp as string) ?? prev.titleProperty,
           groupProperty,
+          groupOptionFilter: Array.isArray(json.groupFilter) ? json.groupFilter as string[] : [],
           dependencyProperty: (json.dependsProp as string) ?? "",
           highlightProperty: (json.highlightProp as string) ?? "",
           highlightBorderColor: (json.highlightBorderColor as string) ?? "#FF5A5F",
@@ -308,6 +310,7 @@ function OnboardingPageInner() {
     dateProperty: "날짜",
     titleProperty: "제목",
     groupProperty: "",
+    groupOptionFilter: [],
     dependencyProperty: "",
     highlightProperty: "",
     highlightBorderColor: "#FF5A5F",
@@ -625,6 +628,7 @@ function OnboardingPageInner() {
         dateProp: settings.dateProperty,
         titleProp: settings.titleProperty,
         ...(settings.groupProperty.trim() ? { groupProp: settings.groupProperty.trim() } : {}),
+        ...(settings.groupOptionFilter.length > 0 ? { groupFilter: settings.groupOptionFilter } : {}),
         ...(settings.dependencyProperty.trim() ? { dependsProp: settings.dependencyProperty.trim() } : {}),
         ...(settings.highlightProperty.trim() ? { highlightProp: settings.highlightProperty.trim(), highlightBorderColor: settings.highlightBorderColor } : {}),
         ...(settings.rowProperty.trim() ? { rowProp: settings.rowProperty.trim() } : {}),
@@ -846,7 +850,7 @@ function OnboardingPageInner() {
         <div className="title-bar">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Settings2 size={18} strokeWidth={2.5} />
-            <span>Y2K Project Calendar</span>
+            <span>Project Calendar</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#eee" }} />
@@ -1546,7 +1550,7 @@ function OnboardingPageInner() {
       </div>
 
       <div className="footer">
-        Y2K Project Calendar<br />
+        Project Calendar<br />
         <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
       </div>
     </>

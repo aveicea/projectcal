@@ -12,6 +12,7 @@ interface Config {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    groupOptionFilter?: string[];
     dependencyProperty?: string;
     highlightProperty?: string;
     highlightBorderColor?: string;
@@ -68,6 +69,7 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         dateProperty: json.dateProp ?? "날짜",
         titleProperty: json.titleProp ?? "제목",
         groupProperty: json.groupProp || undefined,
+        groupOptionFilter: Array.isArray(json.groupFilter) ? json.groupFilter as string[] : undefined,
         dependencyProperty: json.dependsProp || undefined,
         highlightProperty: json.highlightProp || undefined,
         highlightBorderColor: json.highlightBorderColor || undefined,

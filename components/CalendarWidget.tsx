@@ -56,6 +56,8 @@ interface CalendarConfig {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    // 팝업에 표시할 분류(그룹 옵션) 화이트리스트. 비어있으면 전체 표시
+    groupOptionFilter?: string[];
     dependencyProperty?: string;
     highlightProperty?: string;
     highlightBorderColor?: string;
@@ -146,6 +148,11 @@ export default function CalendarWidget({
   const [dropOnHeader, setDropOnHeader] = useState(false);
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
   const [groupPropType, setGroupPropType] = useState<string>("select");
+  // 설정에서 지정한 화이트리스트가 있으면 그 항목만 팝업에 표시
+  const groupFilter = config?.notionConfig.groupOptionFilter;
+  const visibleGroupOptions = groupFilter && groupFilter.length > 0
+    ? groupOptions.filter((o) => groupFilter.includes(o))
+    : groupOptions;
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   // For rollup group props: the underlying relation property name to actually write
   const [groupWriteProp, setGroupWriteProp] = useState<string>("");
@@ -164,21 +171,28 @@ export default function CalendarWidget({
   const popupRef = useRef<HTMLDivElement>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; maxH: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
 
-  // 그룹 팝업 세로 위치: 위젯 본문(헤더 아래~맨 밑) 영역 안에서 항목 중심으로 중앙 정렬,
-  // 위(헤더)나 아래(밑) 공간이 부족하면 그 경계로 밀어 넣는다.
+  // 그룹 팝업 세로 위치: 위젯 본문(헤더 아래 ~ 위젯 맨 밑) 영역 안에서 항목 중심으로 중앙 정렬,
+  // 위(헤더)나 아래(푸터/맨밑) 공간이 부족하면 그 경계로 밀어 넣는다.
   useLayoutEffect(() => {
     if (!eventPopup) { setPopupPos(null); return; }
-    if (!popupRef.current || !bodyRef.current) return;
-    const body = bodyRef.current.getBoundingClientRect();
-    const maxH = Math.max(120, body.height);
+    if (!popupRef.current || !bodyRef.current || !widgetRef.current) return;
+    const bodyR = bodyRef.current.getBoundingClientRect();
+    const widget = widgetRef.current.getBoundingClientRect();
+    const m = 6;
+    // 상단: 헤더 아래(본문 top), 하단: 위젯의 보이는 맨 밑(컨테이너 bottom) — 본문은 내용이 길면
+    // 컨테이너 밖까지 늘어나므로 bottom은 반드시 위젯 컨테이너 기준으로 클램프
+    const boundTop = bodyR.top;
+    const boundBottom = widget.bottom - m;
+    const maxH = Math.max(120, boundBottom - boundTop);
     const natural = popupRef.current.scrollHeight;
     const h = Math.min(natural, maxH);
     const center = (eventPopup.top + eventPopup.bottom) / 2;
     let top = center - h / 2;
-    if (top + h > body.bottom) top = body.bottom - h; // 밑 공간 부족 → 위로
-    if (top < body.top) top = body.top;               // 헤더 공간 부족 → 아래로
+    if (top + h > boundBottom) top = boundBottom - h; // 밑 공간 부족 → 위로
+    if (top < boundTop) top = boundTop;               // 헤더 공간 부족 → 아래로
     setPopupPos({ top, maxH });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventPopup]);
@@ -1224,6 +1238,43 @@ export default function CalendarWidget({
     }
   };
 
+  // 날짜 더블클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
+  const [bulkSending, setBulkSending] = useState(false);
+  const bulkSendDay = async (dateStr: string) => {
+    if (!config) return;
+    const nc = config.notionConfig;
+    if (!nc.plannerDbId || bulkSending) return;
+    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    if (targets.length === 0) return;
+    if (typeof window !== "undefined" && !window.confirm(`${dateStr}의 안 보낸 항목 ${targets.length}개를 플래너로 보낼까요?`)) return;
+    setBulkSending(true);
+    try {
+      for (const p of targets) {
+        await fetch("/api/send-to-planner", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: nc.plannerToken || nc.apiKey,
+            plannerDbId: nc.plannerDbId,
+            parentPageId: p.id,
+            subTitles: [],
+            plannerTitleProp: nc.plannerTitleProp,
+            plannerDateProp: nc.plannerDateProp,
+            plannerBookProp: nc.plannerBookProp,
+            plannerLinkProp: nc.plannerLinkProp,
+            parentRelProp: nc.parentRelProp,
+            bookProp: nc.bookProperty,
+            titleProperty: nc.titleProperty,
+            dateProperty: nc.dateProperty,
+          }),
+        }).catch(() => {});
+      }
+    } finally {
+      setBulkSending(false);
+      fetchProjects();
+    }
+  };
+
   // 포인터 위치 → 날짜/행/일정/헤더 (마우스+터치 공통)
   const locateAt = (x: number, y: number) => {
     const els = (typeof document !== "undefined" ? document.elementsFromPoint(x, y) : []) as HTMLElement[];
@@ -1394,7 +1445,7 @@ export default function CalendarWidget({
         />
       )}
 
-      <div style={{
+      <div ref={widgetRef} style={{
         fontFamily: font, background: bgColor,
         border: darkMode ? "none" : `1px solid ${primaryColor}`,
         outline: darkMode ? "none" : `2px solid ${headerBg}`,
@@ -1749,8 +1800,10 @@ export default function CalendarWidget({
                     {/* Date header — drag an event here to delete */}
                     <div
                       data-pcal-header="1"
+                      title={config?.notionConfig.plannerDbId && configId !== "preview" ? "더블클릭: 이 날짜의 안 보낸 항목 전체 플래너로 보내기" : undefined}
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
                       onClick={goToToday}
+                      onDoubleClick={(e) => { if (config?.notionConfig.plannerDbId && configId !== "preview") { e.stopPropagation(); bulkSendDay(dateStr); } }}
                     >
                       {isMonthBoundary ? (
                         <span style={{
@@ -1889,7 +1942,7 @@ export default function CalendarWidget({
                             onClick={(e) => {
                               if (Date.now() - lastDragEnd.current < 300) return;
                               // 더블클릭이면 팝업을 열지 않도록 지연 후 실행 (dblclick에서 취소)
-                              const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
+                              const hasGroup = !!config?.notionConfig.groupProperty && visibleGroupOptions.length > 0;
                               if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
                                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2247,7 +2300,7 @@ export default function CalendarWidget({
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ maxHeight: maxH, overflowY: "auto" }}>
-            {groupOptions.map((opt) => {
+            {visibleGroupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
               return (
                 <div
