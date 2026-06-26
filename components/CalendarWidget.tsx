@@ -2090,7 +2090,8 @@ export default function CalendarWidget({
                                       style={{ ...iconBtn, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 12, opacity: seg.highlighted ? 1 : 0.45, zIndex: 320 }}
                                     >★</button>
                                   )}
-                                  {/* 보내기: 막대 아래(별표 위치 바로 아래)에 표시 */}
+                                  {/* 보내기: 막대 아래(별표 위치 바로 아래)에 표시. 막대 하단에 밀착(top:100%)하고
+                                      paddingTop으로 아이콘을 더 내려, 호버가 끊기지 않게 다리를 놓는다 */}
                                   {showSend && (
                                     <button
                                       title="플래너로 보내기"
@@ -2102,8 +2103,8 @@ export default function CalendarWidget({
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
-                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "100%", marginTop: 1, color: "#888", zIndex: 320 }}
-                                    ><Send size={11} strokeWidth={2.5} /></button>
+                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "100%", paddingTop: 5, alignItems: "flex-start", color: "#888", zIndex: 320 }}
+                                    ><Send size={11} strokeWidth={2.5} style={{ transform: "scaleX(-1)" }} /></button>
                                   )}
                                 </>
                               );
