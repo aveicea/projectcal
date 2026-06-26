@@ -2091,7 +2091,7 @@ export default function CalendarWidget({
                                 filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.35))",
                               };
                               return (
-                                <div style={{ position: "absolute", right: 2, top: -14, display: "flex", gap: 4, zIndex: 320 }}>
+                                <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 320 }}>
                                   {showHighlight && (
                                     <button
                                       title={seg.highlighted ? "강조 해제" : "강조"}
