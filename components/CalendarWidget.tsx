@@ -125,18 +125,11 @@ export default function CalendarWidget({
   initialGroupColors,
   widgetConfigStr,
 }: CalendarWidgetProps) {
-  const [centerYear, setCenterYear] = useState<number | null>(null);
-  const [centerMonth, setCenterMonth] = useState<number | null>(null);
-  const [todayStr, setTodayStr] = useState<string>("");
-  const [weekStartStr, setWeekStartStr] = useState<string>("");
-
-  useEffect(() => {
-    const now = new Date();
-    setCenterYear(now.getFullYear());
-    setCenterMonth(now.getMonth());
-    setTodayStr(now.toDateString());
-    setWeekStartStr(formatDate(getWeekStart(now)));
-  }, []);
+  // ssr:false로 로드되므로 현재 날짜로 즉시 초기화 → 첫 로딩에 "로딩 중" 대신 컨테이너 바로 표시
+  const [centerYear, setCenterYear] = useState<number | null>(() => new Date().getFullYear());
+  const [centerMonth, setCenterMonth] = useState<number | null>(() => new Date().getMonth());
+  const [todayStr, setTodayStr] = useState<string>(() => new Date().toDateString());
+  const [weekStartStr, setWeekStartStr] = useState<string>(() => formatDate(getWeekStart(new Date())));
 
   const [projects, setProjects] = useState<ProjectSegment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2087,7 +2080,17 @@ export default function CalendarWidget({
                                 color: "rgba(255,255,255,0.8)",
                               };
                               return (
-                                <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 320 }}>
+                                <>
+                                  {/* 별표: 막대 세로 중앙에 겹쳐 표시 */}
+                                  {showHighlight && (
+                                    <button
+                                      title={seg.highlighted ? "강조 해제" : "강조"}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
+                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 12, opacity: seg.highlighted ? 1 : 0.45, zIndex: 320 }}
+                                    >★</button>
+                                  )}
+                                  {/* 보내기: 막대 아래(별표 위치 바로 아래)에 표시 */}
                                   {showSend && (
                                     <button
                                       title="플래너로 보내기"
@@ -2099,18 +2102,10 @@ export default function CalendarWidget({
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
-                                      style={{ ...iconBtn }}
+                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "100%", marginTop: 1, color: "#888", zIndex: 320 }}
                                     ><Send size={11} strokeWidth={2.5} /></button>
                                   )}
-                                  {showHighlight && (
-                                    <button
-                                      title={seg.highlighted ? "강조 해제" : "강조"}
-                                      onPointerDown={(e) => e.stopPropagation()}
-                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
-                                      style={{ ...iconBtn, fontSize: 12, opacity: seg.highlighted ? 1 : 0.45 }}
-                                    >★</button>
-                                  )}
-                                </div>
+                                </>
                               );
                             })()}
                           </div>
