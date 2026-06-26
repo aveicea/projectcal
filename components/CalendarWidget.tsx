@@ -1019,13 +1019,14 @@ export default function CalendarWidget({
   }
 
   // 겹침 해소: 원하는 줄을 우선 유지하되, 충돌하면 다음 빈 줄로 내려보냄(절대 겹치지 않게).
-  // 두 줄 보기이거나 펼친 상위 항목이 있을 때 적용.
-  if ((multiRow || expandedParents.size > 0) && !hasDeps) {
+  // 드래그한(직접 위치 지정한) 항목을 같은 줄에서 먼저 배치 → 끌어 올리면 기존 항목이 밀려난다.
+  if (multiRow || expandedParents.size > 0) {
     const occ = new Map<number, Array<{ s: string; e: string }>>();
     const conflict = (r: number, s: string, e: string) =>
       (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
     const ordered = [...allDisplayProjects].sort((a, b) =>
       ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
+      ((rowOverrides.has(a.id) ? 0 : 1) - (rowOverrides.has(b.id) ? 0 : 1)) ||
       a.startDate.localeCompare(b.startDate));
     for (const p of ordered) {
       let r = effectiveRowMap.get(p.id) ?? 0;
@@ -1038,7 +1039,8 @@ export default function CalendarWidget({
 
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
-  const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
+  // 드래그 중엔 맨 아래에 빈 줄 하나를 더 둬서 "새 줄"로 떨어뜨릴 수 있게 한다.
+  const totalRows = Math.max(dragId ? maxRow + 1 : maxRow, 1);
 
   // ── Dependency connector lines (선행 → 후속) ─────────────────────────────────
   // Geometry mirrors the day-grid: each column is `dayWidth` wide, the grid has
@@ -1347,15 +1349,25 @@ export default function CalendarWidget({
     }
   };
 
-  // 날짜 더블클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
+  // 날짜 클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
   const [bulkSending, setBulkSending] = useState(false);
-  const bulkSendDay = async (dateStr: string) => {
+  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 확인 팝업 사용
+  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; count: number } | null>(null);
+  const bulkSendDay = (dateStr: string) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
     const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
     if (targets.length === 0) return;
-    if (typeof window !== "undefined" && !window.confirm(`${dateStr}의 안 보낸 항목 ${targets.length}개를 플래너로 보낼까요?`)) return;
+    setBulkConfirm({ dateStr, count: targets.length });
+  };
+  const doBulkSend = async (dateStr: string) => {
+    if (!config) return;
+    const nc = config.notionConfig;
+    if (!nc.plannerDbId || bulkSending) return;
+    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    setBulkConfirm(null);
+    if (targets.length === 0) return;
     setBulkSending(true);
     try {
       for (const p of targets) {
@@ -1830,7 +1842,11 @@ export default function CalendarWidget({
         )}
 
         {loading ? (
-          <div style={{ textAlign: "center", padding: 12, color: "#888", fontSize: 11 }}>Loading...</div>
+          <div style={{
+            textAlign: "center", padding: "40px 12px", color: "#aaa", fontSize: 11,
+            // 로딩 중에도 달력 가로 폭을 유지(작게 줄어들지 않게)
+            width: displayDays.length * dayWidth + 24, maxWidth: "100%", boxSizing: "border-box",
+          }}>Loading...</div>
         ) : (
           <div
             ref={bodyRef}
@@ -2503,6 +2519,28 @@ export default function CalendarWidget({
         </div>
         );
       })()}
+
+      {/* 날짜 일괄 보내기 확인 (임베드 안전) */}
+      {bulkConfirm && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => { if (!bulkSending) setBulkConfirm(null); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 280, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 6 }}>📤 날짜 일괄 보내기</div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 14 }}>
+              {bulkConfirm.dateStr}의 아직 안 보낸 항목 <b>{bulkConfirm.count}개</b>를 플래너로 보낼까요?
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setBulkConfirm(null)} disabled={bulkSending}
+                style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}>취소</button>
+              <button onClick={() => doBulkSend(bulkConfirm.dateStr)} disabled={bulkSending}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: bulkSending ? 0.7 : 1 }}>
+                {bulkSending ? "보내는 중…" : "보내기"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 플래너로 보내기 모달 */}
       {sendPopup && (
