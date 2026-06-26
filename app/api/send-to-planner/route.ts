@@ -53,15 +53,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: { message: "필수 파라미터가 누락되었습니다." } }, { status: 400 });
     }
 
-    const titleProp = "범위";
-    const dateProp = "날짜";
-    const bookPropPlanner = b.plannerBookProp || "책";
-    const linkProp = b.plannerLinkProp || "PLANNER";
+    const cfgLinkProp = b.plannerLinkProp || "PLANNER";
+    const cfgBookPropPlanner = b.plannerBookProp || "책";
     const parentRelProp = b.parentRelProp || "상위 항목";
     const bookPropSrc = b.bookProp || "책";
-
-    const plannerTitleProp = b.plannerTitleProp || titleProp;
-    const plannerDateProp = b.plannerDateProp || dateProp;
+    const cfgPlannerTitleProp = b.plannerTitleProp || "범위";
+    const cfgPlannerDateProp = b.plannerDateProp || "날짜";
 
     const notion = new Client({ auth: b.apiKey });
 
@@ -72,6 +69,7 @@ export async function POST(req: NextRequest) {
     }
     const parentProps = parent.properties as PropMap;
     const parentTitle = readTitle(parentProps, b.titleProperty);
+    const parentDbId = (parent as { parent?: { database_id?: string } }).parent?.database_id;
 
     const srcDateProp = b.dateProperty ? parentProps[b.dateProperty] : undefined;
     const dateVal = srcDateProp?.type === "date" ? srcDateProp.date : undefined;
@@ -82,14 +80,46 @@ export async function POST(req: NextRequest) {
       ? { date: { start: dateVal.start, end: dateVal.end ?? null } }
       : null;
 
+    // 2) 플래너 DB 스키마를 읽어 속성 이름을 실제 스키마 기준으로 해석 (이름 추측 대신)
+    const plannerDb = await notion.databases.retrieve({ database_id: b.plannerDbId });
+    const plannerSchema = plannerDb.properties as Record<string, { type: string; relation?: { database_id?: string } }>;
+
+    // 제목: 실제 title 속성
+    let plannerTitleProp = cfgPlannerTitleProp;
+    for (const [name, p] of Object.entries(plannerSchema)) { if (p.type === "title") { plannerTitleProp = name; break; } }
+
+    // 날짜: 설정값이 date면 사용, 아니면 첫 date 속성, 없으면 생략
+    let plannerDateProp: string | null = null;
+    if (plannerSchema[cfgPlannerDateProp]?.type === "date") plannerDateProp = cfgPlannerDateProp;
+    else for (const [name, p] of Object.entries(plannerSchema)) { if (p.type === "date") { plannerDateProp = name; break; } }
+
+    // 책: 설정값이 relation으로 존재할 때만 복사
+    const plannerBookProp = plannerSchema[cfgBookPropPlanner]?.type === "relation" ? cfgBookPropPlanner : null;
+
+    // 프젝칼로 연결되는 관계형: 프젝칼 DB를 가리키는 relation 우선, 없으면 설정 이름, 그래도 없으면 새로 생성
+    let linkProp: string | null = null;
+    for (const [name, p] of Object.entries(plannerSchema)) {
+      if (p.type === "relation" && parentDbId && p.relation?.database_id === parentDbId) { linkProp = name; break; }
+    }
+    if (!linkProp && plannerSchema[cfgLinkProp]?.type === "relation") linkProp = cfgLinkProp;
+    if (!linkProp) {
+      if (!parentDbId) throw new Error("상위 항목의 데이터베이스를 확인할 수 없어 관계형을 만들 수 없습니다.");
+      // 프젝칼 DB를 가리키는 양방향 관계형을 플래너 DB에 새로 생성
+      await notion.databases.update({
+        database_id: b.plannerDbId,
+        properties: { [cfgLinkProp]: { relation: { database_id: parentDbId, type: "dual_property", dual_property: {} } } } as never,
+      });
+      linkProp = cfgLinkProp;
+    }
+
     // 플래너 페이지 1개 생성 헬퍼
     const createPlannerPage = async (title: string, linkIds: string[]) => {
       const properties: Record<string, unknown> = {
         [plannerTitleProp]: { title: [{ text: { content: title } }] },
-        [linkProp]: { relation: linkIds.map((id) => ({ id })) },
+        [linkProp!]: { relation: linkIds.map((id) => ({ id })) },
       };
-      if (datePropValue) properties[plannerDateProp] = datePropValue;
-      if (bookIds.length > 0) properties[bookPropPlanner] = { relation: bookIds.map((id) => ({ id })) };
+      if (datePropValue && plannerDateProp) properties[plannerDateProp] = datePropValue;
+      if (bookIds.length > 0 && plannerBookProp) properties[plannerBookProp] = { relation: bookIds.map((id) => ({ id })) };
       const page = await notion.pages.create({ parent: { database_id: b.plannerDbId }, properties: properties as never });
       return (page as { id: string }).id;
     };
