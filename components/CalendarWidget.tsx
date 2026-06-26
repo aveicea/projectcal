@@ -2221,6 +2221,8 @@ export default function CalendarWidget({
         const aboveSpace = eventPopup.bottom - margin;
         const useAbove = belowSpace < 200 && aboveSpace > belowSpace;
         const maxH = Math.max(120, useAbove ? aboveSpace : belowSpace);
+        // 내용이 짧아도 날짜(상단)~항목(막대)까지 내려와 겹치도록 최소 높이 보장
+        const minH = useAbove ? undefined : Math.max(0, eventPopup.bottom - eventPopup.top);
         const vPos: React.CSSProperties = useAbove
           ? { bottom: vh - eventPopup.bottom }
           : { top: eventPopup.top };
@@ -2231,6 +2233,7 @@ export default function CalendarWidget({
               position: "fixed", left, ...vPos,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
               border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
+              ...(minH ? { minHeight: minH } : {}),
             }}
             onClick={(e) => e.stopPropagation()}
           >
