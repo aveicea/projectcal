@@ -997,8 +997,9 @@ export default function CalendarWidget({
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
 
-  // 펼친 상위 항목: 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
-  // 단, 사용자가 직접 드래그한 하위는 그 위치를 존중. 전역으로 밀지 않고 겹침은 아래 해소 패스가 처리.
+  // 펼친 상위 항목: 하위 항목은 "항상" 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
+  // 하위는 줄 속성/드래그와 무관하게 상위 아래로 강제 → 절대 상위 위로 올라가지 않음.
+  const forcedChildRows = new Set<string>();
   if (expandedParents.size > 0) {
     const parents = allDisplayProjects
       .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
@@ -1006,7 +1007,6 @@ export default function CalendarWidget({
     for (const P of parents) {
       const pRow = effectiveRowMap.get(P.id) ?? 0;
       const kids = [...(childrenByParent.get(P.id) ?? [])]
-        .filter((k) => !rowOverrides.has(k.id))
         .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
       const rowEnds: string[] = [];
       for (const c of kids) {
@@ -1014,6 +1014,7 @@ export default function CalendarWidget({
         if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
         else rowEnds[r] = c.endDate;
         effectiveRowMap.set(c.id, pRow + 1 + r);
+        forcedChildRows.add(c.id);
       }
     }
   }
@@ -1024,13 +1025,18 @@ export default function CalendarWidget({
     const occ = new Map<number, Array<{ s: string; e: string }>>();
     const conflict = (r: number, s: string, e: string) =>
       (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
+    // 강제 배치된 하위 항목을 먼저 고정(밀리지 않게), 이후 드래그한 항목, 나머지 순으로 배치
+    const prio = (id: string) => forcedChildRows.has(id) ? 0 : (rowOverrides.has(id) ? 1 : 2);
     const ordered = [...allDisplayProjects].sort((a, b) =>
       ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
-      ((rowOverrides.has(a.id) ? 0 : 1) - (rowOverrides.has(b.id) ? 0 : 1)) ||
+      (prio(a.id) - prio(b.id)) ||
       a.startDate.localeCompare(b.startDate));
     for (const p of ordered) {
       let r = effectiveRowMap.get(p.id) ?? 0;
-      while (conflict(r, p.startDate, p.endDate)) r++;
+      // 강제 하위는 그 줄에 고정(겹치면 나머지가 비킴)
+      if (!forcedChildRows.has(p.id)) {
+        while (conflict(r, p.startDate, p.endDate)) r++;
+      }
       effectiveRowMap.set(p.id, r);
       if (!occ.has(r)) occ.set(r, []);
       occ.get(r)!.push({ s: p.startDate, e: p.endDate });
