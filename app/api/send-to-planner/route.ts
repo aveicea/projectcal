@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       };
       if (datePropValue) properties[plannerDateProp] = datePropValue;
       if (bookIds.length > 0) properties[bookPropPlanner] = { relation: bookIds.map((id) => ({ id })) };
-      const page = await notion.pages.create({ parent: { database_id: b.plannerDbId }, properties });
+      const page = await notion.pages.create({ parent: { database_id: b.plannerDbId }, properties: properties as never });
       return (page as { id: string }).id;
     };
 
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       properties[parentRelProp] = { relation: [{ id: b.parentPageId }] };
       if (datePropValue && b.dateProperty) properties[b.dateProperty] = datePropValue;
       if (bookIds.length > 0) properties[bookPropSrc] = { relation: bookIds.map((id) => ({ id })) };
-      const page = await notion.pages.create({ parent: { database_id: parentDbId! }, properties });
+      const page = await notion.pages.create({ parent: { database_id: parentDbId! }, properties: properties as never });
       return (page as { id: string }).id;
     };
 

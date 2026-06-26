@@ -40,6 +40,15 @@ interface Settings {
   highlightProperty: string;
   highlightBorderColor: string;
   rowProperty: string;
+  doneProperty: string;
+  plannerDbId: string;
+  plannerToken: string;
+  plannerTitleProp: string;
+  plannerDateProp: string;
+  plannerBookProp: string;
+  plannerLinkProp: string;
+  parentRelProp: string;
+  bookProperty: string;
   primaryColor: string;
   backgroundColor: string;
   backgroundOpacity: number;
@@ -158,6 +167,15 @@ function OnboardingPageInner() {
           highlightProperty: (json.highlightProp as string) ?? "",
           highlightBorderColor: (json.highlightBorderColor as string) ?? "#FF5A5F",
           rowProperty: (json.rowProp as string) ?? "",
+          doneProperty: (json.doneProp as string) ?? "",
+          plannerDbId: (json.plannerDbId as string) ?? "",
+          plannerToken: (json.plannerToken as string) ?? "",
+          plannerTitleProp: (json.plannerTitleProp as string) ?? "범위",
+          plannerDateProp: (json.plannerDateProp as string) ?? "날짜",
+          plannerBookProp: (json.plannerBookProp as string) ?? "책",
+          plannerLinkProp: (json.plannerLinkProp as string) ?? "PLANNER",
+          parentRelProp: (json.parentRelProp as string) ?? "상위 항목",
+          bookProperty: (json.bookProp as string) ?? "책",
           primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
           backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
           backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
@@ -227,6 +245,15 @@ function OnboardingPageInner() {
         titleProperty: (json.titleProp as string) ?? prev.titleProperty,
         groupProperty,
         dependencyProperty: (json.dependsProp as string) ?? "",
+        doneProperty: (json.doneProp as string) ?? "",
+        plannerDbId: (json.plannerDbId as string) ?? "",
+        plannerToken: (json.plannerToken as string) ?? "",
+        plannerTitleProp: (json.plannerTitleProp as string) ?? "범위",
+        plannerDateProp: (json.plannerDateProp as string) ?? "날짜",
+        plannerBookProp: (json.plannerBookProp as string) ?? "책",
+        plannerLinkProp: (json.plannerLinkProp as string) ?? "PLANNER",
+        parentRelProp: (json.parentRelProp as string) ?? "상위 항목",
+        bookProperty: (json.bookProp as string) ?? "책",
         primaryColor: (json.primaryColor as string) ?? prev.primaryColor,
         backgroundColor: (json.backgroundColor as string) ?? prev.backgroundColor,
         backgroundOpacity: (json.backgroundOpacity as number) ?? prev.backgroundOpacity,
@@ -282,6 +309,15 @@ function OnboardingPageInner() {
     highlightProperty: "",
     highlightBorderColor: "#FF5A5F",
     rowProperty: "",
+    doneProperty: "",
+    plannerDbId: "",
+    plannerToken: "",
+    plannerTitleProp: "범위",
+    plannerDateProp: "날짜",
+    plannerBookProp: "책",
+    plannerLinkProp: "PLANNER",
+    parentRelProp: "상위 항목",
+    bookProperty: "책",
     primaryColor: "#B5E3F0",
     backgroundColor: "#FFFCF9",
     backgroundOpacity: 100,
@@ -520,6 +556,17 @@ function OnboardingPageInner() {
         ...(settings.dependencyProperty.trim() ? { dependsProp: settings.dependencyProperty.trim() } : {}),
         ...(settings.highlightProperty.trim() ? { highlightProp: settings.highlightProperty.trim(), highlightBorderColor: settings.highlightBorderColor } : {}),
         ...(settings.rowProperty.trim() ? { rowProp: settings.rowProperty.trim() } : {}),
+        ...(settings.doneProperty.trim() ? { doneProp: settings.doneProperty.trim() } : {}),
+        ...(settings.plannerDbId.trim() ? {
+          plannerDbId: settings.plannerDbId.trim(),
+          ...(settings.plannerToken.trim() ? { plannerToken: settings.plannerToken.trim() } : {}),
+          plannerTitleProp: settings.plannerTitleProp.trim() || "범위",
+          plannerDateProp: settings.plannerDateProp.trim() || "날짜",
+          plannerBookProp: settings.plannerBookProp.trim() || "책",
+          plannerLinkProp: settings.plannerLinkProp.trim() || "PLANNER",
+          parentRelProp: settings.parentRelProp.trim() || "상위 항목",
+          bookProp: settings.bookProperty.trim() || "책",
+        } : {}),
         primaryColor: settings.primaryColor,
         backgroundColor: settings.backgroundColor,
         backgroundOpacity: settings.backgroundOpacity,
@@ -1128,6 +1175,68 @@ function OnboardingPageInner() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* 플래너 연결 — 프젝칼 항목을 플래너로 "보내기" */}
+              <div style={{ width: "100%", background: "#F4F9FF", border: "1px solid #CFE2F5", borderRadius: 16, padding: "20px 24px" }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 4, color: "#3A6EA5", display: "flex", alignItems: "center", gap: 8 }}>
+                  📤 플래너 연결 <span style={{ fontWeight: 400, color: "#9bb8d6" }}>(선택)</span>
+                </h3>
+                <div style={{ fontSize: 12, color: "#88a", marginBottom: 16 }}>
+                  설정하면 달력 항목을 클릭해 플래너로 보낼 수 있습니다. 제목·날짜·책을 복사하고 관계형으로 연결됩니다.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>플래너 데이터베이스 ID</label>
+                    <input className="soft-input" value={settings.plannerDbId}
+                      onChange={(e) => update("plannerDbId", e.target.value)}
+                      placeholder="플래너 DB ID (32자리)"
+                      style={{ marginBottom: 0, fontSize: 13 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                      플래너 토큰 <span style={{ fontWeight: 400, color: "#bbb" }}>(비우면 위 토큰 공유)</span>
+                    </label>
+                    <input type="password" className="soft-input" value={settings.plannerToken}
+                      onChange={(e) => update("plannerToken", e.target.value)}
+                      placeholder="secret_... (선택)"
+                      style={{ marginBottom: 0, fontSize: 13 }} />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                    ✔ 완료(줄긋기) 속성 <span style={{ fontWeight: 400, color: "#bbb" }}>(프젝칼의 롤업/수식/체크박스, 선택)</span>
+                  </label>
+                  <input className="soft-input" value={settings.doneProperty}
+                    onChange={(e) => update("doneProperty", e.target.value)}
+                    placeholder="예: 완료"
+                    style={{ marginBottom: 0, fontSize: 13 }} />
+                  <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                    연결된 플래너 항목이 모두 완료되면 이 속성을 읽어 항목에 줄긋기를 표시합니다
+                  </div>
+                </div>
+                {settings.plannerDbId.trim() && (
+                  <details style={{ marginTop: 14 }}>
+                    <summary style={{ fontSize: 12, color: "#3A6EA5", cursor: "pointer", fontWeight: 600 }}>속성 이름 (기본값 사용 권장)</summary>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
+                      {([
+                        ["plannerTitleProp", "플래너 제목"],
+                        ["plannerDateProp", "플래너 날짜"],
+                        ["plannerBookProp", "플래너 책"],
+                        ["plannerLinkProp", "플래너→프젝칼 관계형"],
+                        ["parentRelProp", "프젝칼 상위 항목 관계형"],
+                        ["bookProperty", "프젝칼 책 관계형"],
+                      ] as [keyof Settings, string][]).map(([key, label]) => (
+                        <div key={key}>
+                          <label style={{ fontSize: 11, color: "#999", display: "block", marginBottom: 4 }}>{label}</label>
+                          <input className="soft-input" value={settings[key] as string}
+                            onChange={(e) => update(key, e.target.value as never)}
+                            style={{ marginBottom: 0, fontSize: 12, padding: 10 }} />
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
 
               {/* 라이브 프리뷰 */}

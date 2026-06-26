@@ -12,6 +12,8 @@ export interface Project {
   highlighted?: boolean;
   // 행 위치(선택) 속성에 저장된 줄 위치
   rowPos?: number;
+  // 완료(줄긋기) — 연결된 플래너 항목이 모두 완료되면 true
+  done?: boolean;
 }
 
 export interface ProjectSegment extends Project {
