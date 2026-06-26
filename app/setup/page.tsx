@@ -1166,6 +1166,42 @@ function OnboardingPageInner() {
                     )}
                   </div>
                 </div>
+                {/* 그룹(분류) 팝업에 표시할 항목 선택/필터 */}
+                {settings.groupProperty && (selectOptions[settings.groupProperty]?.length ?? 0) > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <label style={{ fontSize: 12, color: "#888", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                      🏷 팝업에 표시할 분류 <span style={{ fontWeight: 400, color: "#bbb" }}>(미선택 시 전체 표시)</span>
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {selectOptions[settings.groupProperty].map((opt) => {
+                        const on = settings.groupOptionFilter.includes(opt);
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => update("groupOptionFilter", on
+                              ? settings.groupOptionFilter.filter((o) => o !== opt)
+                              : [...settings.groupOptionFilter, opt])}
+                            style={{
+                              padding: "5px 10px", fontSize: 12, borderRadius: 16, cursor: "pointer",
+                              border: `1px solid ${on ? "#E8A8C0" : "#e5e5e7"}`,
+                              background: on ? "#FFF0F5" : "#fff", color: on ? "#D88AA8" : "#888",
+                              fontWeight: on ? 700 : 400,
+                            }}
+                          >
+                            {on ? "✓ " : ""}{opt || "(빈 값)"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {settings.groupOptionFilter.length > 0 && (
+                      <button type="button" onClick={() => update("groupOptionFilter", [])}
+                        style={{ marginTop: 8, fontSize: 11, color: "#aaa", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+                        전체 표시로 초기화
+                      </button>
+                    )}
+                  </div>
+                )}
                 {/* 의존성(선행 작업) 속성 — Notion 관계형 연결을 선으로 표시 */}
                 {(() => {
                   const relationProps = groupableProperties.filter((p) => p.type === "relation");

@@ -170,6 +170,8 @@ export default function CalendarWidget({
   // 그룹 팝업: 위젯 본문 영역 안에서 항목 기준 세로 중앙 정렬 + 경계 클램프 (측정 기반)
   const popupRef = useRef<HTMLDivElement>(null);
   const [popupPos, setPopupPos] = useState<{ top: number; maxH: number } | null>(null);
+  // 상위 항목 토글 → 펼치면 하위 항목이 그 아래에 막대로 표시됨
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
   const bodyRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
@@ -858,6 +860,7 @@ export default function CalendarWidget({
               ...(config.notionConfig.rowProperty ? { rowProp: config.notionConfig.rowProperty } : {}),
               ...(config.notionConfig.doneProperty ? { doneProp: config.notionConfig.doneProperty } : {}),
               ...(config.notionConfig.plannerDbId ? { plannerDbId: config.notionConfig.plannerDbId } : {}),
+              ...(config.notionConfig.parentRelProp ? { parentRelProp: config.notionConfig.parentRelProp } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -932,13 +935,30 @@ export default function CalendarWidget({
 
   // ── Layout computation ────────────────────────────────────────────────────
 
+  // 상위→하위 항목 맵 (하위 항목은 개별 막대로 표시하지 않고 상위 토글 안에서 보여준다)
+  const childrenByParent = new Map<string, Project[]>();
+  for (const p of projects) {
+    if (p.parentId) {
+      const arr = childrenByParent.get(p.parentId) ?? [];
+      arr.push(p);
+      childrenByParent.set(p.parentId, arr);
+    }
+  }
+
   // Apply date overrides to both Notion and GCal events
   // Hide Notion events that have been synced to GCal (show GCal version instead)
+  // 하위 항목(parentId 있음)은 부모가 펼쳐진 경우에만 막대로 렌더
   const effectiveNotionProjects: AnySegment[] = projects
-    .filter((p) => !gcalSyncedNotionIds.has(p.id))
+    .filter((p) => !gcalSyncedNotionIds.has(p.id) && (!p.parentId || expandedParents.has(p.parentId)))
     .map((p) => {
       const o = dateOverrides.get(p.id);
-      return o ? { ...p, ...o } : p;
+      let seg: AnySegment = o ? { ...p, ...o } : p;
+      // 하위 항목은 상위와 같은 색을 약간 연하게
+      if (p.parentId) {
+        const parentColor = projects.find((pp) => pp.id === p.parentId)?.color;
+        if (parentColor) seg = { ...seg, color: lightenColor(parentColor, 0.35) };
+      }
+      return seg;
     });
 
   const effectiveGCalProjects: AnySegment[] = gcalProjects.map((p) => {
@@ -1061,6 +1081,45 @@ export default function CalendarWidget({
         propType: "date",
       }),
     }).catch(() => { /* keep optimistic value */ });
+
+    // 이미 플래너로 보낸 항목이면, 연결된 미완료 플래너 항목의 날짜도 동기화
+    const nc = config.notionConfig;
+    if (nc.plannerDbId && projects.find((p) => p.id === pageId)?.sent) {
+      fetch("/api/sync-planner-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: nc.plannerToken || nc.apiKey,
+          plannerDbId: nc.plannerDbId,
+          parentPageId: pageId,
+          start: startDate,
+          end: endDate,
+          plannerDateProp: nc.plannerDateProp,
+        }),
+      }).catch(() => { /* best-effort */ });
+    }
+
+    // 이동한 항목이 하위 항목이면 상위 항목 날짜를 하위들 전체를 포함하도록 갱신(프젝칼 날짜만)
+    const moved = projects.find((p) => p.id === pageId);
+    if (moved?.parentId) {
+      const kids = projects.filter((p) => p.parentId === moved.parentId);
+      let minS = startDate, maxE = endDate;
+      for (const k of kids) {
+        const eff = k.id === pageId ? { startDate, endDate } : (dateOverrides.get(k.id) ?? { startDate: k.startDate, endDate: k.endDate });
+        if (eff.startDate < minS) minS = eff.startDate;
+        if (eff.endDate > maxE) maxE = eff.endDate;
+      }
+      const parent = projects.find((p) => p.id === moved.parentId);
+      const pEff = parent ? (dateOverrides.get(parent.id) ?? { startDate: parent.startDate, endDate: parent.endDate }) : null;
+      if (parent && pEff && (pEff.startDate !== minS || pEff.endDate !== maxE)) {
+        setDateOverrides((prev) => { const n = new Map(prev); n.set(parent.id, { startDate: minS, endDate: maxE }); return n; });
+        fetch("/api/update-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: nc.apiKey, pageId: parent.id, property: nc.dateProperty, value: { start: minS, end: maxE }, propType: "date" }),
+        }).catch(() => { /* keep optimistic */ });
+      }
+    }
   };
 
   const persistNotionRow = (pageId: string, row: number) => {
@@ -1512,7 +1571,7 @@ export default function CalendarWidget({
             )}
             {widgetConfigStr ? (
               <a
-                href={`/onboarding?from=${widgetConfigStr}`}
+                href={`/setup?from=${widgetConfigStr}`}
                 title="설정 수정"
                 style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7, textDecoration: "none", cursor: "pointer" }}
               >
@@ -1856,6 +1915,8 @@ export default function CalendarWidget({
                     >
                       {segments.map((seg) => {
                         const isHovered = hoveredId === seg.id;
+                        const segChildren = !seg.isGCal ? childrenByParent.get(seg.id) : undefined;
+                        const hasChildren = !!segChildren && segChildren.length > 0;
                         const isDragging = dragId === seg.id;
                         const isUpdating = gcalUpdatingId === seg.id;
                         const row = effectiveRowMap.get(seg.id) ?? 0;
@@ -2096,13 +2157,13 @@ export default function CalendarWidget({
                               );
                             })() : showLabel && (
                               <span style={{
-                                position: "absolute", left: 2, display: "flex",
+                                position: "absolute", left: hasChildren && seg.isStart ? 13 : 2, display: "flex",
                                 justifyContent: "flex-start", alignItems: "center",
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 pointerEvents: "none", fontSize: 9,
                                 color: labelColor,
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
-                                width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
+                                width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4 - (hasChildren && seg.isStart ? 11 : 0), 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
                                 textDecoration: seg.done ? "line-through" : "none",
                                 opacity: seg.done ? 0.6 : 1,
@@ -2111,6 +2172,30 @@ export default function CalendarWidget({
                                 {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
                               </span>
                             )}
+                            {/* 상위 항목 디스클로저 토글 — 펼치면 하위 항목이 그 아래 막대로 표시됨 */}
+                            {hasChildren && seg.isStart && (() => {
+                              const expanded = expandedParents.has(seg.id);
+                              return (
+                                <button
+                                  title={`하위 항목 ${segChildren!.length}개 ${expanded ? "접기" : "펼치기"}`}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedParents((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(seg.id)) next.delete(seg.id); else next.add(seg.id);
+                                      return next;
+                                    });
+                                  }}
+                                  style={{
+                                    position: "absolute", left: 2, top: "50%", transform: "translateY(-50%)",
+                                    width: 11, height: 11, padding: 0, border: "none", background: "transparent",
+                                    color: "rgba(255,255,255,0.95)", fontSize: 8, lineHeight: 1, cursor: "pointer",
+                                    display: "flex", alignItems: "center", justifyContent: "center", zIndex: 320,
+                                  }}
+                                >{expanded ? "▼" : "▶"}</button>
+                              );
+                            })()}
 
                             {/* Import to Notion button (GCal events only) — 노션으로 가져오고 구글 일정은 삭제 */}
                             {isHovered && seg.isStart && seg.isGCal && config && configId !== "preview" && (
