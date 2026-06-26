@@ -1938,13 +1938,6 @@ export default function CalendarWidget({
                             {isHovered && !seg.isGCal && configId !== "preview" && !isDragging && (() => {
                               const hasIncoming = (seg.dependsOn?.length ?? 0) > 0;
                               const hasOutgoing = referencedPredIds.has(seg.id);
-                              const circle: React.CSSProperties = {
-                                position: "absolute", top: "50%", transform: "translateY(-50%)",
-                                width: 8, height: 8, borderRadius: "50%", zIndex: 30, touchAction: "none",
-                                boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 7, fontWeight: 700, lineHeight: 1,
-                              };
                               return (
                                 <>
                                   {seg.isStart && (hasIncoming ? (
@@ -1961,8 +1954,10 @@ export default function CalendarWidget({
                                     <div
                                       title="선행 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                      style={{ ...circle, left: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
-                                    />
+                                      style={{ position: "absolute", right: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "crosshair", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", border: `1.5px solid ${primaryColor}`, boxShadow: "0 1px 2px rgba(0,0,0,0.25)", pointerEvents: "none" }} />
+                                    </div>
                                   ))}
                                   {seg.isEnd && (hasOutgoing ? (
                                     <div
@@ -1977,8 +1972,10 @@ export default function CalendarWidget({
                                     <div
                                       title="후속 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                      style={{ ...circle, right: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
-                                    />
+                                      style={{ position: "absolute", left: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "crosshair", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", border: `1.5px solid ${primaryColor}`, boxShadow: "0 1px 2px rgba(0,0,0,0.25)", pointerEvents: "none" }} />
+                                    </div>
                                   ))}
                                 </>
                               );
