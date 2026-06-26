@@ -1014,6 +1014,28 @@ export default function CalendarWidget({
     }
   }
 
+  // 펼친 상위 항목: 하위 항목을 상위 바로 아래 줄에 연속 배치하고, 그 아래 항목들은 밀어낸다.
+  // (줄 속성/기존 배치보다 이 규칙을 우선)
+  if (expandedParents.size > 0) {
+    const parents = allDisplayProjects
+      .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
+      .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
+    for (const P of parents) {
+      const pRow = effectiveRowMap.get(P.id) ?? 0;
+      const kids = [...(childrenByParent.get(P.id) ?? [])].sort((a, b) => a.startDate.localeCompare(b.startDate));
+      const kidIds = new Set(kids.map((k) => k.id));
+      const n = kids.length;
+      // pRow 아래의 다른 항목들을 n칸 밀어 내려 자리를 비움
+      for (const q of allDisplayProjects) {
+        if (q.id === P.id || kidIds.has(q.id)) continue;
+        const qr = effectiveRowMap.get(q.id);
+        if (qr != null && qr > pRow) effectiveRowMap.set(q.id, qr + n);
+      }
+      // 하위 항목을 상위 바로 아래 줄에 연속 배치
+      kids.forEach((c, i) => effectiveRowMap.set(c.id, pRow + 1 + i));
+    }
+  }
+
   const rowValues = Array.from(effectiveRowMap.values());
   const maxRow = rowValues.length > 0 ? Math.max(...rowValues) + 1 : 1;
   const totalRows = Math.max(dragId ? Math.max(maxRow, 2) : maxRow, 1);
