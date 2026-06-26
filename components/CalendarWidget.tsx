@@ -2087,18 +2087,10 @@ export default function CalendarWidget({
                               const iconBtn: React.CSSProperties = {
                                 padding: 0, border: "none", background: "transparent", cursor: "pointer",
                                 lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                                color: "#fff",
+                                color: "rgba(255,255,255,0.8)",
                               };
                               return (
                                 <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 320 }}>
-                                  {showHighlight && (
-                                    <button
-                                      title={seg.highlighted ? "강조 해제" : "강조"}
-                                      onPointerDown={(e) => e.stopPropagation()}
-                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
-                                      style={{ ...iconBtn, fontSize: 12, opacity: seg.highlighted ? 1 : 0.4 }}
-                                    >★</button>
-                                  )}
                                   {showSend && (
                                     <button
                                       title="플래너로 보내기"
@@ -2112,6 +2104,14 @@ export default function CalendarWidget({
                                       }}
                                       style={{ ...iconBtn }}
                                     ><Send size={11} strokeWidth={2.5} /></button>
+                                  )}
+                                  {showHighlight && (
+                                    <button
+                                      title={seg.highlighted ? "강조 해제" : "강조"}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
+                                      style={{ ...iconBtn, fontSize: 12, opacity: seg.highlighted ? 1 : 0.45 }}
+                                    >★</button>
                                   )}
                                 </div>
                               );
