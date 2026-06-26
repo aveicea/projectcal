@@ -1349,15 +1349,25 @@ export default function CalendarWidget({
     }
   };
 
-  // 날짜 더블클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
+  // 날짜 클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
   const [bulkSending, setBulkSending] = useState(false);
-  const bulkSendDay = async (dateStr: string) => {
+  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 확인 팝업 사용
+  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; count: number } | null>(null);
+  const bulkSendDay = (dateStr: string) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
     const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
     if (targets.length === 0) return;
-    if (typeof window !== "undefined" && !window.confirm(`${dateStr}의 안 보낸 항목 ${targets.length}개를 플래너로 보낼까요?`)) return;
+    setBulkConfirm({ dateStr, count: targets.length });
+  };
+  const doBulkSend = async (dateStr: string) => {
+    if (!config) return;
+    const nc = config.notionConfig;
+    if (!nc.plannerDbId || bulkSending) return;
+    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    setBulkConfirm(null);
+    if (targets.length === 0) return;
     setBulkSending(true);
     try {
       for (const p of targets) {
@@ -2509,6 +2519,28 @@ export default function CalendarWidget({
         </div>
         );
       })()}
+
+      {/* 날짜 일괄 보내기 확인 (임베드 안전) */}
+      {bulkConfirm && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => { if (!bulkSending) setBulkConfirm(null); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 280, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 6 }}>📤 날짜 일괄 보내기</div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 14 }}>
+              {bulkConfirm.dateStr}의 아직 안 보낸 항목 <b>{bulkConfirm.count}개</b>를 플래너로 보낼까요?
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setBulkConfirm(null)} disabled={bulkSending}
+                style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}>취소</button>
+              <button onClick={() => doBulkSend(bulkConfirm.dateStr)} disabled={bulkSending}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: bulkSending ? 0.7 : 1 }}>
+                {bulkSending ? "보내는 중…" : "보내기"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 플래너로 보내기 모달 */}
       {sendPopup && (
