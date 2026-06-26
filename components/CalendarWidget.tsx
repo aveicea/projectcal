@@ -165,7 +165,7 @@ export default function CalendarWidget({
   const [sendState, setSendState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [sendError, setSendError] = useState("");
   // 기존 플래너 항목 토글 선택
-  const [plannerItems, setPlannerItems] = useState<{ id: string; title: string; done: boolean }[]>([]);
+  const [plannerItems, setPlannerItems] = useState<{ id: string; title: string; done: boolean; start: string | null; end: string | null }[]>([]);
   const [plannerItemsLoading, setPlannerItemsLoading] = useState(false);
   const [selectedPlannerIds, setSelectedPlannerIds] = useState<Set<string>>(new Set());
   // 그룹 팝업: 위젯 본문 영역 안에서 항목 기준 세로 중앙 정렬 + 경계 클램프 (측정 기반)
@@ -1299,7 +1299,7 @@ export default function CalendarWidget({
       const res = await fetch("/api/planner-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: nc.plannerToken || nc.apiKey, plannerDbId: nc.plannerDbId }),
+        body: JSON.stringify({ apiKey: nc.plannerToken || nc.apiKey, plannerDbId: nc.plannerDbId, dateProp: nc.plannerDateProp, doneProp: nc.doneProperty }),
       });
       const d = await res.json();
       setPlannerItems(d.success && Array.isArray(d.items) ? d.items : []);
@@ -2549,7 +2549,7 @@ export default function CalendarWidget({
           onClick={() => { if (sendState !== "sending") { setSendPopup(null); setSendText(""); setSendState("idle"); } }}
         >
           <div
-            style={{ background: "#fff", borderRadius: 14, padding: 20, width: 320, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
+            style={{ background: "#fff", borderRadius: 14, padding: 20, width: 320, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>📤 플래너로 보내기</div>
@@ -2571,13 +2571,23 @@ export default function CalendarWidget({
                 fontFamily: "inherit", marginBottom: 12,
               }}
             />
-            {/* 기존 플래너 항목 토글 선택 */}
+            {/* 기존 플래너 항목 토글 선택 — 보내는 항목의 날짜에 해당하는 것만 */}
+            {(() => {
+              const tp = projects.find((p) => p.id === sendPopup.id);
+              const o = dateOverrides.get(sendPopup.id);
+              const ts = o?.startDate ?? tp?.startDate;
+              const te = o?.endDate ?? tp?.endDate;
+              const dayItems = ts && te
+                ? plannerItems.filter((it) => it.start && it.start <= te && (it.end ?? it.start) >= ts)
+                : plannerItems;
+              return (
+            <>
             <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
-              기존 플래너 항목 연결 {plannerItemsLoading ? "(불러오는 중…)" : selectedPlannerIds.size > 0 ? `(${selectedPlannerIds.size}개 선택)` : "(선택)"}
+              그날 플래너 항목 연결 {plannerItemsLoading ? "(불러오는 중…)" : selectedPlannerIds.size > 0 ? `(${selectedPlannerIds.size}개 선택)` : "(선택)"}
             </label>
-            {plannerItems.length > 0 ? (
+            {dayItems.length > 0 ? (
               <div style={{ maxHeight: 140, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 12 }}>
-                {plannerItems.map((it) => {
+                {dayItems.map((it) => {
                   const on = selectedPlannerIds.has(it.id);
                   return (
                     <div
@@ -2611,9 +2621,12 @@ export default function CalendarWidget({
               </div>
             ) : (
               !plannerItemsLoading && (
-                <div style={{ fontSize: 11, color: "#bbb", marginBottom: 12 }}>불러올 기존 항목이 없습니다.</div>
+                <div style={{ fontSize: 11, color: "#bbb", marginBottom: 12 }}>그날 연결할 플래너 항목이 없습니다.</div>
               )
             )}
+            </>
+              );
+            })()}
             {sendState === "error" && (
               <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 10, wordBreak: "break-word" }}>
                 보내기에 실패했습니다.{sendError ? ` (${sendError})` : " 다시 시도해 주세요."}
