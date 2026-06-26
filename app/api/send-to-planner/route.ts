@@ -12,6 +12,8 @@ interface Body {
   plannerDbId: string;
   parentPageId: string;
   subTitles?: string[];
+  // 기존 플래너 항목을 직접 연결 (토글 선택)
+  existingPlannerIds?: string[];
   // 플래너 속성명 (기본: 범위/날짜/책/PLANNER)
   plannerTitleProp?: string;
   plannerDateProp?: string;
@@ -181,8 +183,22 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    if (titles.length === 0) {
-      // 하위 없이 상위 제목 그대로 플래너 1개
+    // 기존 플래너 항목을 상위에 직접 연결 (현재 관계형에 상위 id 추가)
+    const existingIds = [...new Set((b.existingPlannerIds ?? []).filter(Boolean))];
+    for (const pid of existingIds) {
+      await withStep("기존 항목 연결", async () => {
+        const page = await notion.pages.retrieve({ page_id: pid });
+        const cur = isFullPage(page)
+          ? ((page.properties as PropMap)[linkProp!]?.relation ?? []).map((r) => r.id)
+          : [];
+        const next = cur.includes(b.parentPageId) ? cur : [...cur, b.parentPageId];
+        await notion.pages.update({ page_id: pid, properties: { [linkProp!]: { relation: next.map((id) => ({ id })) } } as never });
+      });
+      created.push({ plannerId: pid });
+    }
+
+    if (titles.length === 0 && existingIds.length === 0) {
+      // 입력도 선택도 없으면 상위 제목 그대로 플래너 1개
       const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(parentTitle, [b.parentPageId]));
       created.push({ plannerId });
     } else {

@@ -163,6 +163,10 @@ export default function CalendarWidget({
   const [sendText, setSendText] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [sendError, setSendError] = useState("");
+  // 기존 플래너 항목 토글 선택
+  const [plannerItems, setPlannerItems] = useState<{ id: string; title: string; done: boolean }[]>([]);
+  const [plannerItemsLoading, setPlannerItemsLoading] = useState(false);
+  const [selectedPlannerIds, setSelectedPlannerIds] = useState<Set<string>>(new Set());
   const bodyRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   // Pointer-based drag (works on mouse + touch). Replaces native HTML5 DnD.
@@ -1085,7 +1089,27 @@ export default function CalendarWidget({
       .catch(() => setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, highlighted: !next } : p)));
   };
 
-  // 프젝칼 항목 → 플래너로 복사 (하위 제목 줄단위, 비우면 제목 그대로 1개)
+  // 기존 플래너 항목 목록 불러오기 (보내기 모달 열 때)
+  const loadPlannerItems = async () => {
+    if (!config?.notionConfig.plannerDbId) return;
+    const nc = config.notionConfig;
+    setPlannerItemsLoading(true);
+    try {
+      const res = await fetch("/api/planner-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: nc.plannerToken || nc.apiKey, plannerDbId: nc.plannerDbId }),
+      });
+      const d = await res.json();
+      setPlannerItems(d.success && Array.isArray(d.items) ? d.items : []);
+    } catch {
+      setPlannerItems([]);
+    } finally {
+      setPlannerItemsLoading(false);
+    }
+  };
+
+  // 프젝칼 항목 → 플래너로 복사 (하위 제목 줄단위) + 기존 항목 토글 연결. 둘 다 비우면 제목 그대로 1개
   const sendToPlanner = async () => {
     if (!config || !sendPopup) return;
     const nc = config.notionConfig;
@@ -1102,6 +1126,7 @@ export default function CalendarWidget({
           plannerDbId: nc.plannerDbId,
           parentPageId: sendPopup.id,
           subTitles,
+          existingPlannerIds: [...selectedPlannerIds],
           plannerTitleProp: nc.plannerTitleProp,
           plannerDateProp: nc.plannerDateProp,
           plannerBookProp: nc.plannerBookProp,
@@ -2103,6 +2128,9 @@ export default function CalendarWidget({
                     setSendText("");
                     setSendState("idle");
                     setSendError("");
+                    setSelectedPlannerIds(new Set());
+                    setPlannerItems([]);
+                    loadPlannerItems();
                     setEventPopup(null);
                   }}
                   style={{
@@ -2242,6 +2270,49 @@ export default function CalendarWidget({
                 fontFamily: "inherit", marginBottom: 12,
               }}
             />
+            {/* 기존 플래너 항목 토글 선택 */}
+            <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
+              기존 플래너 항목 연결 {plannerItemsLoading ? "(불러오는 중…)" : selectedPlannerIds.size > 0 ? `(${selectedPlannerIds.size}개 선택)` : "(선택)"}
+            </label>
+            {plannerItems.length > 0 ? (
+              <div style={{ maxHeight: 140, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 12 }}>
+                {plannerItems.map((it) => {
+                  const on = selectedPlannerIds.has(it.id);
+                  return (
+                    <div
+                      key={it.id}
+                      onClick={() => setSelectedPlannerIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(it.id)) next.delete(it.id); else next.add(it.id);
+                        return next;
+                      })}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+                        cursor: "pointer", fontSize: 12, color: "#444",
+                        background: on ? hexToRgba(primaryColor, 0.08) : "transparent",
+                      }}
+                      onMouseEnter={(e) => { if (!on) (e.currentTarget as HTMLElement).style.background = "#f7f7f7"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = on ? hexToRgba(primaryColor, 0.08) : "transparent"; }}
+                    >
+                      <div style={{
+                        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                        border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.6 : 1 }}>
+                        {it.title}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              !plannerItemsLoading && (
+                <div style={{ fontSize: 11, color: "#bbb", marginBottom: 12 }}>불러올 기존 항목이 없습니다.</div>
+              )
+            )}
             {sendState === "error" && (
               <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 10, wordBreak: "break-word" }}>
                 보내기에 실패했습니다.{sendError ? ` (${sendError})` : " 다시 시도해 주세요."}
