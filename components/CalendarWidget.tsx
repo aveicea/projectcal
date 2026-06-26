@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronLeft, ChevronRight, Link } from "lucide-react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { ChevronLeft, ChevronRight, Link, Send } from "lucide-react";
 import {
   Project,
   ProjectSegment,
@@ -56,10 +56,23 @@ interface CalendarConfig {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    // 팝업에 표시할 분류(그룹 옵션) 화이트리스트. 비어있으면 전체 표시
+    groupOptionFilter?: string[];
     dependencyProperty?: string;
     highlightProperty?: string;
     highlightBorderColor?: string;
     rowProperty?: string;
+    // 완료(줄긋기) 속성 — 연결된 플래너 항목이 모두 완료되면 줄긋기
+    doneProperty?: string;
+    // 플래너 연결 (프젝칼 → 플래너 보내기)
+    plannerDbId?: string;
+    plannerToken?: string;       // 비우면 apiKey 공유
+    plannerTitleProp?: string;   // 기본 범위
+    plannerDateProp?: string;    // 기본 날짜
+    plannerBookProp?: string;    // 기본 책
+    plannerLinkProp?: string;    // 기본 PLANNER (플래너→프젝칼 관계형)
+    parentRelProp?: string;      // 프젝칼 네이티브 상위 항목 관계형 (기본 "상위 항목")
+    bookProperty?: string;       // 프젝칼 책 관계형 (기본 책)
   };
   theme: CalendarTheme;
 }
@@ -114,18 +127,11 @@ export default function CalendarWidget({
   initialGroupColors,
   widgetConfigStr,
 }: CalendarWidgetProps) {
-  const [centerYear, setCenterYear] = useState<number | null>(null);
-  const [centerMonth, setCenterMonth] = useState<number | null>(null);
-  const [todayStr, setTodayStr] = useState<string>("");
-  const [weekStartStr, setWeekStartStr] = useState<string>("");
-
-  useEffect(() => {
-    const now = new Date();
-    setCenterYear(now.getFullYear());
-    setCenterMonth(now.getMonth());
-    setTodayStr(now.toDateString());
-    setWeekStartStr(formatDate(getWeekStart(now)));
-  }, []);
+  // ssr:false로 로드되므로 현재 날짜로 즉시 초기화 → 첫 로딩에 "로딩 중" 대신 컨테이너 바로 표시
+  const [centerYear, setCenterYear] = useState<number | null>(() => new Date().getFullYear());
+  const [centerMonth, setCenterMonth] = useState<number | null>(() => new Date().getMonth());
+  const [todayStr, setTodayStr] = useState<string>(() => new Date().toDateString());
+  const [weekStartStr, setWeekStartStr] = useState<string>(() => formatDate(getWeekStart(new Date())));
 
   const [projects, setProjects] = useState<ProjectSegment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,13 +148,54 @@ export default function CalendarWidget({
   const [dropOnHeader, setDropOnHeader] = useState(false);
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
   const [groupPropType, setGroupPropType] = useState<string>("select");
+  // 설정에서 지정한 화이트리스트가 있으면 그 항목만 팝업에 표시
+  const groupFilter = config?.notionConfig.groupOptionFilter;
+  const visibleGroupOptions = groupFilter && groupFilter.length > 0
+    ? groupOptions.filter((o) => groupFilter.includes(o))
+    : groupOptions;
   const [groupOptionIds, setGroupOptionIds] = useState<Record<string, string>>({});
   // For rollup group props: the underlying relation property name to actually write
   const [groupWriteProp, setGroupWriteProp] = useState<string>("");
-  const [eventPopup, setEventPopup] = useState<{ id: string; group: string; x: number; y: number } | null>(null);
+  const [eventPopup, setEventPopup] = useState<{ id: string; group: string; left: number; right: number; top: number; bottom: number } | null>(null);
   const [editingTitle, setEditingTitle] = useState<{ id: string; value: string } | null>(null);
+  // 플래너로 보내기 모달
+  const [sendPopup, setSendPopup] = useState<{ id: string; title: string } | null>(null);
+  const [sendText, setSendText] = useState("");
+  const [sendState, setSendState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const [sendError, setSendError] = useState("");
+  // 기존 플래너 항목 토글 선택
+  const [plannerItems, setPlannerItems] = useState<{ id: string; title: string; done: boolean }[]>([]);
+  const [plannerItemsLoading, setPlannerItemsLoading] = useState(false);
+  const [selectedPlannerIds, setSelectedPlannerIds] = useState<Set<string>>(new Set());
+  // 그룹 팝업: 위젯 본문 영역 안에서 항목 기준 세로 중앙 정렬 + 경계 클램프 (측정 기반)
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [popupPos, setPopupPos] = useState<{ top: number; maxH: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
+
+  // 그룹 팝업 세로 위치: 위젯 본문(헤더 아래 ~ 위젯 맨 밑) 영역 안에서 항목 중심으로 중앙 정렬,
+  // 위(헤더)나 아래(푸터/맨밑) 공간이 부족하면 그 경계로 밀어 넣는다.
+  useLayoutEffect(() => {
+    if (!eventPopup) { setPopupPos(null); return; }
+    if (!popupRef.current || !bodyRef.current || !widgetRef.current) return;
+    const bodyR = bodyRef.current.getBoundingClientRect();
+    const widget = widgetRef.current.getBoundingClientRect();
+    const m = 6;
+    // 상단: 헤더 아래(본문 top), 하단: 위젯의 보이는 맨 밑(컨테이너 bottom) — 본문은 내용이 길면
+    // 컨테이너 밖까지 늘어나므로 bottom은 반드시 위젯 컨테이너 기준으로 클램프
+    const boundTop = bodyR.top;
+    const boundBottom = widget.bottom - m;
+    const maxH = Math.max(120, boundBottom - boundTop);
+    const natural = popupRef.current.scrollHeight;
+    const h = Math.min(natural, maxH);
+    const center = (eventPopup.top + eventPopup.bottom) / 2;
+    let top = center - h / 2;
+    if (top + h > boundBottom) top = boundBottom - h; // 밑 공간 부족 → 위로
+    if (top < boundTop) top = boundTop;               // 헤더 공간 부족 → 아래로
+    setPopupPos({ top, maxH });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventPopup]);
   // Pointer-based drag (works on mouse + touch). Replaces native HTML5 DnD.
   const pdrag = useRef<{
     mode: "move" | "resize-start" | "resize-end" | "link";
@@ -809,6 +856,8 @@ export default function CalendarWidget({
               ...(config.notionConfig.dependencyProperty ? { dependsProp: config.notionConfig.dependencyProperty } : {}),
               ...(config.notionConfig.highlightProperty ? { highlightProp: config.notionConfig.highlightProperty } : {}),
               ...(config.notionConfig.rowProperty ? { rowProp: config.notionConfig.rowProperty } : {}),
+              ...(config.notionConfig.doneProperty ? { doneProp: config.notionConfig.doneProperty } : {}),
+              ...(config.notionConfig.plannerDbId ? { plannerDbId: config.notionConfig.plannerDbId } : {}),
             },
             startDate: fetchStart,
             endDate: fetchEnd,
@@ -1130,6 +1179,102 @@ export default function CalendarWidget({
       .catch(() => setProjects((ps) => ps.map((p) => p.id === pageId ? { ...p, highlighted: !next } : p)));
   };
 
+  // 기존 플래너 항목 목록 불러오기 (보내기 모달 열 때)
+  const loadPlannerItems = async () => {
+    if (!config?.notionConfig.plannerDbId) return;
+    const nc = config.notionConfig;
+    setPlannerItemsLoading(true);
+    try {
+      const res = await fetch("/api/planner-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: nc.plannerToken || nc.apiKey, plannerDbId: nc.plannerDbId }),
+      });
+      const d = await res.json();
+      setPlannerItems(d.success && Array.isArray(d.items) ? d.items : []);
+    } catch {
+      setPlannerItems([]);
+    } finally {
+      setPlannerItemsLoading(false);
+    }
+  };
+
+  // 프젝칼 항목 → 플래너로 복사 (하위 제목 줄단위) + 기존 항목 토글 연결. 둘 다 비우면 제목 그대로 1개
+  const sendToPlanner = async () => {
+    if (!config || !sendPopup) return;
+    const nc = config.notionConfig;
+    if (!nc.plannerDbId) return;
+    const subTitles = sendText.split("\n").map((s) => s.trim()).filter(Boolean);
+    setSendState("sending");
+    setSendError("");
+    try {
+      const res = await fetch("/api/send-to-planner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: nc.plannerToken || nc.apiKey,
+          plannerDbId: nc.plannerDbId,
+          parentPageId: sendPopup.id,
+          subTitles,
+          existingPlannerIds: [...selectedPlannerIds],
+          plannerTitleProp: nc.plannerTitleProp,
+          plannerDateProp: nc.plannerDateProp,
+          plannerBookProp: nc.plannerBookProp,
+          plannerLinkProp: nc.plannerLinkProp,
+          parentRelProp: nc.parentRelProp,
+          bookProp: nc.bookProperty,
+          titleProperty: nc.titleProperty,
+          dateProperty: nc.dateProperty,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.error?.message || "보내기 실패");
+      setSendState("done");
+      setTimeout(() => { setSendPopup(null); setSendText(""); setSendState("idle"); fetchProjects(); }, 700);
+    } catch (e) {
+      console.error(e);
+      setSendError(e instanceof Error ? e.message : String(e));
+      setSendState("error");
+    }
+  };
+
+  // 날짜 더블클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
+  const [bulkSending, setBulkSending] = useState(false);
+  const bulkSendDay = async (dateStr: string) => {
+    if (!config) return;
+    const nc = config.notionConfig;
+    if (!nc.plannerDbId || bulkSending) return;
+    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    if (targets.length === 0) return;
+    if (typeof window !== "undefined" && !window.confirm(`${dateStr}의 안 보낸 항목 ${targets.length}개를 플래너로 보낼까요?`)) return;
+    setBulkSending(true);
+    try {
+      for (const p of targets) {
+        await fetch("/api/send-to-planner", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: nc.plannerToken || nc.apiKey,
+            plannerDbId: nc.plannerDbId,
+            parentPageId: p.id,
+            subTitles: [],
+            plannerTitleProp: nc.plannerTitleProp,
+            plannerDateProp: nc.plannerDateProp,
+            plannerBookProp: nc.plannerBookProp,
+            plannerLinkProp: nc.plannerLinkProp,
+            parentRelProp: nc.parentRelProp,
+            bookProp: nc.bookProperty,
+            titleProperty: nc.titleProperty,
+            dateProperty: nc.dateProperty,
+          }),
+        }).catch(() => {});
+      }
+    } finally {
+      setBulkSending(false);
+      fetchProjects();
+    }
+  };
+
   // 포인터 위치 → 날짜/행/일정/헤더 (마우스+터치 공통)
   const locateAt = (x: number, y: number) => {
     const els = (typeof document !== "undefined" ? document.elementsFromPoint(x, y) : []) as HTMLElement[];
@@ -1300,7 +1445,7 @@ export default function CalendarWidget({
         />
       )}
 
-      <div style={{
+      <div ref={widgetRef} style={{
         fontFamily: font, background: bgColor,
         border: darkMode ? "none" : `1px solid ${primaryColor}`,
         outline: darkMode ? "none" : `2px solid ${headerBg}`,
@@ -1648,15 +1793,17 @@ export default function CalendarWidget({
                 const isColDrop = !!dragId && dropDateStr === dateStr;
 
                 return (
-                  <div key={dateStr} style={{
+                  <div key={dateStr} data-pcal-col="1" style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
                     width: dayWidth, flexShrink: 0,
                   }}>
                     {/* Date header — drag an event here to delete */}
                     <div
                       data-pcal-header="1"
+                      title={config?.notionConfig.plannerDbId && configId !== "preview" ? "더블클릭: 이 날짜의 안 보낸 항목 전체 플래너로 보내기" : undefined}
                       style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 6, height: 34, position: "relative", opacity: isCurrWeek ? 1 : 0.55, borderRadius: 6, background: dropOnHeader && dragId ? "rgba(239,68,68,0.12)" : "transparent", transition: "background 0.15s", cursor: "pointer" }}
                       onClick={goToToday}
+                      onDoubleClick={(e) => { if (config?.notionConfig.plannerDbId && configId !== "preview") { e.stopPropagation(); bulkSendDay(dateStr); } }}
                     >
                       {isMonthBoundary ? (
                         <span style={{
@@ -1795,15 +1942,15 @@ export default function CalendarWidget({
                             onClick={(e) => {
                               if (Date.now() - lastDragEnd.current < 300) return;
                               // 더블클릭이면 팝업을 열지 않도록 지연 후 실행 (dblclick에서 취소)
-                              const hasGroup = !!config?.notionConfig.groupProperty && groupOptions.length > 0;
-                              const hasHighlight = !!config?.notionConfig.highlightProperty;
-                              if (!seg.isGCal && seg.isStart && (hasGroup || hasHighlight)) {
+                              const hasGroup = !!config?.notionConfig.groupProperty && visibleGroupOptions.length > 0;
+                              if (!seg.isGCal && seg.isStart && hasGroup) {
                                 e.stopPropagation();
-                                const cx = e.clientX, cy = e.clientY;
+                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                const anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
                                 if (clickTimer.current) clearTimeout(clickTimer.current);
                                 clickTimer.current = setTimeout(() => {
                                   clickTimer.current = null;
-                                  setEventPopup({ id: seg.id, group: seg.group ?? "", x: cx, y: cy });
+                                  setEventPopup({ id: seg.id, group: seg.group ?? "", ...anchor });
                                 }, 250);
                               }
                             }}
@@ -1857,42 +2004,44 @@ export default function CalendarWidget({
                             {isHovered && !seg.isGCal && configId !== "preview" && !isDragging && (() => {
                               const hasIncoming = (seg.dependsOn?.length ?? 0) > 0;
                               const hasOutgoing = referencedPredIds.has(seg.id);
-                              const circle: React.CSSProperties = {
-                                position: "absolute", top: "50%", transform: "translateY(-50%)",
-                                width: 8, height: 8, borderRadius: "50%", zIndex: 30, touchAction: "none",
-                                boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 7, fontWeight: 700, lineHeight: 1,
-                              };
                               return (
                                 <>
                                   {seg.isStart && (hasIncoming ? (
+                                    // 작은 ✕는 유지하되, 막대 모서리에 밀착한 넓은 투명 히트 영역으로 감싸 틈 없이 클릭 가능
                                     <div
                                       title="선행 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearIncoming(seg); }}
-                                      style={{ ...circle, left: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
-                                    >×</div>
+                                      style={{ position: "absolute", right: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e53e3e", color: "#fff", fontSize: 6, fontWeight: 600, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>×</div>
+                                    </div>
                                   ) : (
                                     <div
                                       title="선행 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, false)}
-                                      style={{ ...circle, left: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
-                                    />
+                                      style={{ position: "absolute", right: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "crosshair", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", border: `1.5px solid ${primaryColor}`, boxShadow: "0 1px 2px rgba(0,0,0,0.25)", pointerEvents: "none" }} />
+                                    </div>
                                   ))}
                                   {seg.isEnd && (hasOutgoing ? (
                                     <div
                                       title="후속 작업 연결 삭제"
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => { e.stopPropagation(); clearOutgoing(seg); }}
-                                      style={{ ...circle, right: -11, width: 7, height: 7, fontSize: 6, fontWeight: 600, background: "#e53e3e", color: "#fff", cursor: "pointer" }}
-                                    >×</div>
+                                      style={{ position: "absolute", left: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e53e3e", color: "#fff", fontSize: 6, fontWeight: 600, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>×</div>
+                                    </div>
                                   ) : (
                                     <div
                                       title="후속 작업 연결"
                                       onPointerDown={(e) => startPointerDrag(e, "link", seg, dateStr, true)}
-                                      style={{ ...circle, right: -11, background: "#fff", border: `1.5px solid ${primaryColor}`, cursor: "crosshair" }}
-                                    />
+                                      style={{ position: "absolute", left: "100%", top: 0, height: "100%", width: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "crosshair", zIndex: 30 }}
+                                    >
+                                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff", border: `1.5px solid ${primaryColor}`, boxShadow: "0 1px 2px rgba(0,0,0,0.25)", pointerEvents: "none" }} />
+                                    </div>
                                   ))}
                                 </>
                               );
@@ -1955,6 +2104,8 @@ export default function CalendarWidget({
                                 height: "100%", boxSizing: "border-box", padding: "0 6px",
                                 width: `${Math.max(dayWidth * Math.max(labelDuration, 1) - 4, 21)}px`,
                                 zIndex: isHovered ? 201 : 3,
+                                textDecoration: seg.done ? "line-through" : "none",
+                                opacity: seg.done ? 0.6 : 1,
                               }}>
                                 {isUpdating && <span style={{ display: "inline-block", animation: "pcal-spin 1s linear infinite", marginRight: 2 }}>↻</span>}
                                 {truncateTitle(seg.title, Math.max(labelDuration, 1), dayWidth)}
@@ -1990,6 +2141,47 @@ export default function CalendarWidget({
                                 {importingId === seg.id ? "..." : "→N"}
                               </button>
                             )}
+
+                            {/* 막대 위에 떠 있는 작은 버튼들: 강조 토글 + 플래너 보내기 (Notion 시작 세그먼트, 호버) */}
+                            {isHovered && seg.isStart && !seg.isGCal && config && configId !== "preview" && !isDragging && (() => {
+                              const showHighlight = !!config.notionConfig.highlightProperty;
+                              const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
+                              if (!showHighlight && !showSend) return null;
+                              const iconBtn: React.CSSProperties = {
+                                padding: 0, border: "none", background: "transparent", cursor: "pointer",
+                                lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                                color: "rgba(255,255,255,0.8)",
+                              };
+                              return (
+                                <>
+                                  {/* 별표: 막대 세로 중앙에 겹쳐 표시 */}
+                                  {showHighlight && (
+                                    <button
+                                      title={seg.highlighted ? "강조 해제" : "강조"}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => { e.stopPropagation(); toggleHighlight(seg.id, !seg.highlighted); }}
+                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 12, opacity: seg.highlighted ? 1 : 0.45, zIndex: 320 }}
+                                    >★</button>
+                                  )}
+                                  {/* 보내기: 막대 아래(별표 위치 바로 아래)에 표시. 막대 하단에 밀착(top:100%)하고
+                                      paddingTop으로 아이콘을 더 내려, 호버가 끊기지 않게 다리를 놓는다 */}
+                                  {showSend && (
+                                    <button
+                                      title="플래너로 보내기"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSendPopup({ id: seg.id, title: seg.title });
+                                        setSendText(""); setSendState("idle"); setSendError("");
+                                        setSelectedPlannerIds(new Set()); setPlannerItems([]);
+                                        loadPlannerItems();
+                                      }}
+                                      style={{ ...iconBtn, position: "absolute", right: 8, top: "100%", paddingTop: 5, alignItems: "flex-start", color: "#888", zIndex: 320 }}
+                                    ><Send size={11} strokeWidth={2.5} style={{ transform: "scaleX(-1)" }} /></button>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -2086,51 +2278,29 @@ export default function CalendarWidget({
       )}
 
       {eventPopup && (() => {
-        const popupW = 150, maxH = 160;
+        const popupW = 150, margin = 8;
         const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-        const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-        const safeLeft = Math.min(Math.max(eventPopup.x, 8), vw - popupW - 8);
-        const safeTop = Math.min(Math.max(eventPopup.y + 6, 8), vh - maxH - 8);
+        // 가로: 클릭한 일정의 오른쪽(= 다음날 왼쪽)에 붙임. 넘치면 일정 왼쪽으로 플립
+        let left = eventPopup.right;
+        if (left + popupW + margin > vw) left = eventPopup.left - popupW;
+        left = Math.min(Math.max(left, margin), vw - popupW - margin);
+        // 세로 위치/높이는 useLayoutEffect(popupPos)에서 위젯 본문 영역 기준으로 계산. 측정 전에는 숨김.
+        const top = popupPos?.top ?? eventPopup.top;
+        const maxH = popupPos?.maxH ?? 9999;
         return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
+            ref={popupRef}
             style={{
-              position: "fixed", left: safeLeft, top: safeTop,
+              position: "fixed", left, top,
               background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-              border: "1px solid #eee", padding: "4px 0", minWidth: popupW,
-              maxHeight: maxH, overflowY: "auto", zIndex: 10001,
+              border: "1px solid #eee", padding: "4px 0", minWidth: popupW, zIndex: 10001,
+              opacity: popupPos ? 1 : 0,
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 강조(중요) 체크 — 맨 위, 노션에 저장 */}
-            {config?.notionConfig.highlightProperty && (() => {
-              const cur = projects.find((p) => p.id === eventPopup.id);
-              const on = !!cur?.highlighted;
-              const hl = config.notionConfig.highlightBorderColor || "#FF5A5F";
-              return (
-                <div
-                  onClick={() => toggleHighlight(eventPopup.id, !on)}
-                  style={{
-                    padding: "6px 10px", fontSize: 11, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8,
-                    borderBottom: groupOptions.length > 0 ? "1px solid #eee" : "none",
-                    fontWeight: 600, color: "#444",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                >
-                  <div style={{
-                    width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                    border: `1.5px solid ${on ? hl : "#ccc"}`, background: on ? hl : "transparent",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
-                  </div>
-                  ⭐ 강조
-                </div>
-              );
-            })()}
-            {groupOptions.map((opt) => {
+            <div style={{ maxHeight: maxH, overflowY: "auto" }}>
+            {visibleGroupOptions.map((opt) => {
               const isCurrent = eventPopup.group === opt;
               return (
                 <div
@@ -2193,10 +2363,108 @@ export default function CalendarWidget({
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
         );
       })()}
+
+      {/* 플래너로 보내기 모달 */}
+      {sendPopup && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => { if (sendState !== "sending") { setSendPopup(null); setSendText(""); setSendState("idle"); } }}
+        >
+          <div
+            style={{ background: "#fff", borderRadius: 14, padding: 20, width: 320, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>📤 플래너로 보내기</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {sendPopup.title || "제목 없음"}
+            </div>
+            <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
+              하위 항목 (한 줄에 하나씩, 비우면 제목 그대로 1개)
+            </label>
+            <textarea
+              value={sendText}
+              onChange={(e) => setSendText(e.target.value)}
+              placeholder={"예) 1장 읽기\n2장 읽기"}
+              rows={5}
+              autoFocus
+              style={{
+                width: "100%", boxSizing: "border-box", padding: 10, fontSize: 13,
+                border: "1px solid #e5e5e7", borderRadius: 8, outline: "none", resize: "vertical",
+                fontFamily: "inherit", marginBottom: 12,
+              }}
+            />
+            {/* 기존 플래너 항목 토글 선택 */}
+            <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
+              기존 플래너 항목 연결 {plannerItemsLoading ? "(불러오는 중…)" : selectedPlannerIds.size > 0 ? `(${selectedPlannerIds.size}개 선택)` : "(선택)"}
+            </label>
+            {plannerItems.length > 0 ? (
+              <div style={{ maxHeight: 140, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 12 }}>
+                {plannerItems.map((it) => {
+                  const on = selectedPlannerIds.has(it.id);
+                  return (
+                    <div
+                      key={it.id}
+                      onClick={() => setSelectedPlannerIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(it.id)) next.delete(it.id); else next.add(it.id);
+                        return next;
+                      })}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+                        cursor: "pointer", fontSize: 12, color: "#444",
+                        background: on ? hexToRgba(primaryColor, 0.08) : "transparent",
+                      }}
+                      onMouseEnter={(e) => { if (!on) (e.currentTarget as HTMLElement).style.background = "#f7f7f7"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = on ? hexToRgba(primaryColor, 0.08) : "transparent"; }}
+                    >
+                      <div style={{
+                        width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                        border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: it.done ? "line-through" : "none", opacity: it.done ? 0.6 : 1 }}>
+                        {it.title}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              !plannerItemsLoading && (
+                <div style={{ fontSize: 11, color: "#bbb", marginBottom: 12 }}>불러올 기존 항목이 없습니다.</div>
+              )
+            )}
+            {sendState === "error" && (
+              <div style={{ fontSize: 12, color: "#e53e3e", marginBottom: 10, wordBreak: "break-word" }}>
+                보내기에 실패했습니다.{sendError ? ` (${sendError})` : " 다시 시도해 주세요."}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => { setSendPopup(null); setSendText(""); setSendState("idle"); }}
+                disabled={sendState === "sending"}
+                style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}
+              >
+                취소
+              </button>
+              <button
+                onClick={sendToPlanner}
+                disabled={sendState === "sending" || sendState === "done"}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: sendState === "sending" ? 0.7 : 1 }}
+              >
+                {sendState === "sending" ? "보내는 중…" : sendState === "done" ? "완료 ✓" : "보내기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </>
   );

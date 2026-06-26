@@ -12,10 +12,20 @@ interface Config {
     dateProperty: string;
     titleProperty: string;
     groupProperty?: string;
+    groupOptionFilter?: string[];
     dependencyProperty?: string;
     highlightProperty?: string;
     highlightBorderColor?: string;
     rowProperty?: string;
+    doneProperty?: string;
+    plannerDbId?: string;
+    plannerToken?: string;
+    plannerTitleProp?: string;
+    plannerDateProp?: string;
+    plannerBookProp?: string;
+    plannerLinkProp?: string;
+    parentRelProp?: string;
+    bookProperty?: string;
   };
   theme: {
     primaryColor: string;
@@ -59,10 +69,20 @@ function decodeWidgetConfig(cfg: string): { config: Config; barColors: string[] 
         dateProperty: json.dateProp ?? "날짜",
         titleProperty: json.titleProp ?? "제목",
         groupProperty: json.groupProp || undefined,
+        groupOptionFilter: Array.isArray(json.groupFilter) ? json.groupFilter as string[] : undefined,
         dependencyProperty: json.dependsProp || undefined,
         highlightProperty: json.highlightProp || undefined,
         highlightBorderColor: json.highlightBorderColor || undefined,
         rowProperty: json.rowProp || undefined,
+        doneProperty: json.doneProp || undefined,
+        plannerDbId: json.plannerDbId || undefined,
+        plannerToken: json.plannerToken || undefined,
+        plannerTitleProp: json.plannerTitleProp || undefined,
+        plannerDateProp: json.plannerDateProp || undefined,
+        plannerBookProp: json.plannerBookProp || undefined,
+        plannerLinkProp: json.plannerLinkProp || undefined,
+        parentRelProp: json.parentRelProp || undefined,
+        bookProperty: json.bookProp || undefined,
       },
       theme: {
         primaryColor: json.primaryColor ?? "#E8A8C0",
