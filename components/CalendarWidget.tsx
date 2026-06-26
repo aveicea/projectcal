@@ -2212,15 +2212,16 @@ export default function CalendarWidget({
         let left = eventPopup.right;
         if (left + popupW + margin > vw) left = eventPopup.left - popupW;
         left = Math.min(Math.max(left, margin), vw - popupW - margin);
-        // 세로: 항목(막대) 아래에 바닥을 맞추고 위로 자란다. 짧으면 항목 옆에 작게, 길면 날짜 쪽으로 올라가며 넘치면 스크롤.
-        // 위 공간이 너무 좁으면 아래로 자라도록 폴백.
+        // 세로: 항목(막대) 위에서 시작해 아래로 자라되, 너무 밑으로 가지 않게 최대 높이를 제한(넘치면 스크롤).
+        // 아래 공간이 너무 좁으면 위로 자라도록 폴백.
+        const cap = 220;
         const aboveSpace = eventPopup.bottom - margin;
         const belowSpace = vh - eventPopup.top - margin;
-        const growUp = aboveSpace >= 140 || aboveSpace >= belowSpace;
-        const maxH = Math.max(120, growUp ? aboveSpace : belowSpace);
-        const vPos: React.CSSProperties = growUp
-          ? { bottom: vh - eventPopup.bottom }
-          : { top: eventPopup.top };
+        const growDown = belowSpace >= 140 || belowSpace >= aboveSpace;
+        const maxH = Math.min(cap, Math.max(120, growDown ? belowSpace : aboveSpace));
+        const vPos: React.CSSProperties = growDown
+          ? { top: eventPopup.top }
+          : { bottom: vh - eventPopup.bottom };
         return (
         <div style={{ position: "fixed", inset: 0, zIndex: 10000 }} onClick={() => setEventPopup(null)}>
           <div
