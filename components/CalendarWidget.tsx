@@ -2584,7 +2584,7 @@ export default function CalendarWidget({
               {sendPopup.title || "제목 없음"}
             </div>
             <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
-              하위 항목 (제목 + 날짜{projects.find((p) => p.id === sendPopup.id)?.sent ? "" : ", 비우면 제목 그대로 1개"})
+              하위 항목{projects.find((p) => p.id === sendPopup.id)?.sent ? "" : " (비우면 제목 그대로 1개)"} <span style={{ color: "#bbb" }}>· 날짜는 보낸 뒤 막대를 옮기면 플래너에 반영됩니다</span>
             </label>
             <div style={{ marginBottom: 8 }}>
               {sendRows.map((row, i) => (
@@ -2596,17 +2596,11 @@ export default function CalendarWidget({
                     autoFocus={i === 0}
                     style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: "1px solid #e5e5e7", borderRadius: 8, outline: "none" }}
                   />
-                  <input
-                    type="date"
-                    value={row.date}
-                    onChange={(e) => setSendRows((rs) => rs.map((r, j) => j === i ? { ...r, date: e.target.value } : r))}
-                    style={{ width: 120, boxSizing: "border-box", padding: "7px 8px", fontSize: 12, border: "1px solid #e5e5e7", borderRadius: 8, outline: "none" }}
-                  />
                   <button onClick={() => setSendRows((rs) => rs.length > 1 ? rs.filter((_, j) => j !== i) : rs)}
                     style={{ border: "none", background: "none", color: "#bbb", cursor: "pointer", fontSize: 15, padding: "0 2px" }}>×</button>
                 </div>
               ))}
-              <button onClick={() => setSendRows((rs) => [...rs, { title: "", date: rs[rs.length - 1]?.date || "" }])}
+              <button onClick={() => setSendRows((rs) => [...rs, { title: "", date: "" }])}
                 style={{ fontSize: 12, color: primaryColor, background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: "2px 0" }}>+ 하위 추가</button>
             </div>
             {/* 기존 플래너 항목 토글 선택 — 보내는 항목의 날짜에 해당하는 것만 */}
