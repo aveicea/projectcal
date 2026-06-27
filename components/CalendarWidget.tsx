@@ -1357,21 +1357,23 @@ export default function CalendarWidget({
 
   // 날짜 클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
   const [bulkSending, setBulkSending] = useState(false);
-  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 확인 팝업 사용
-  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; count: number } | null>(null);
+  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 선택/확인 팝업 사용
+  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; items: { id: string; title: string }[] } | null>(null);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const bulkSendDay = (dateStr: string) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
-    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    const targets = projects.filter((p) => !p.sent && !p.parentId && p.startDate <= dateStr && dateStr <= p.endDate);
     if (targets.length === 0) return;
-    setBulkConfirm({ dateStr, count: targets.length });
+    setBulkConfirm({ dateStr, items: targets.map((p) => ({ id: p.id, title: p.title })) });
+    setBulkSelected(new Set(targets.map((p) => p.id))); // 기본 전체 선택
   };
-  const doBulkSend = async (dateStr: string) => {
+  const doBulkSend = async (ids: string[]) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
-    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    const targets = projects.filter((p) => ids.includes(p.id));
     setBulkConfirm(null);
     if (targets.length === 0) return;
     setBulkSending(true);
@@ -2302,7 +2304,8 @@ export default function CalendarWidget({
                             {/* 막대 위에 떠 있는 작은 버튼들: 강조 토글 + 플래너 보내기 (Notion 시작 세그먼트, 호버) */}
                             {isHovered && seg.isStart && !seg.isGCal && config && configId !== "preview" && !isDragging && (() => {
                               const showHighlight = !!config.notionConfig.highlightProperty;
-                              const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
+                              // 이미 보낸 항목에도 표시 → 하위 항목/연결 추가 가능
+                              const showSend = !!config.notionConfig.plannerDbId;
                               if (!showHighlight && !showSend) return null;
                               const iconBtn: React.CSSProperties = {
                                 padding: 0, border: "none", background: "transparent", cursor: "pointer",
@@ -2532,17 +2535,32 @@ export default function CalendarWidget({
           style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => { if (!bulkSending) setBulkConfirm(null); }}
         >
-          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 280, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 300, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 6 }}>📤 날짜 일괄 보내기</div>
-            <div style={{ fontSize: 12, color: "#666", marginBottom: 14 }}>
-              {bulkConfirm.dateStr}의 아직 안 보낸 항목 <b>{bulkConfirm.count}개</b>를 플래너로 보낼까요?
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
+              {bulkConfirm.dateStr} — 보낼 항목을 선택하세요 ({bulkSelected.size}/{bulkConfirm.items.length})
+            </div>
+            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
+              {bulkConfirm.items.map((it) => {
+                const on = bulkSelected.has(it.id);
+                return (
+                  <div key={it.id}
+                    onClick={() => setBulkSelected((prev) => { const n = new Set(prev); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, color: "#444", background: on ? hexToRgba(primaryColor, 0.08) : "transparent" }}>
+                    <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                    </div>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "제목 없음"}</span>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setBulkConfirm(null)} disabled={bulkSending}
                 style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}>취소</button>
-              <button onClick={() => doBulkSend(bulkConfirm.dateStr)} disabled={bulkSending}
-                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: bulkSending ? 0.7 : 1 }}>
-                {bulkSending ? "보내는 중…" : "보내기"}</button>
+              <button onClick={() => doBulkSend([...bulkSelected])} disabled={bulkSending || bulkSelected.size === 0}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: (bulkSending || bulkSelected.size === 0) ? 0.5 : 1 }}>
+                {bulkSending ? "보내는 중…" : `${bulkSelected.size}개 보내기`}</button>
             </div>
           </div>
         </div>
@@ -2558,12 +2576,14 @@ export default function CalendarWidget({
             style={{ background: "#fff", borderRadius: 14, padding: 20, width: 320, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>📤 플래너로 보내기</div>
+            {(() => { const s = projects.find((p) => p.id === sendPopup.id)?.sent; return (
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>{s ? "📤 하위 항목 추가" : "📤 플래너로 보내기"}</div>
+            ); })()}
             <div style={{ fontSize: 12, color: "#888", marginBottom: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {sendPopup.title || "제목 없음"}
             </div>
             <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
-              하위 항목 (한 줄에 하나씩, 비우면 제목 그대로 1개)
+              하위 항목 (한 줄에 하나씩{projects.find((p) => p.id === sendPopup.id)?.sent ? "" : ", 비우면 제목 그대로 1개"})
             </label>
             <textarea
               value={sendText}
@@ -2646,13 +2666,21 @@ export default function CalendarWidget({
               >
                 취소
               </button>
-              <button
-                onClick={sendToPlanner}
-                disabled={sendState === "sending" || sendState === "done"}
-                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: sendState === "sending" ? 0.7 : 1 }}
-              >
-                {sendState === "sending" ? "보내는 중…" : sendState === "done" ? "완료 ✓" : "보내기"}
-              </button>
+              {(() => {
+                // 이미 보낸 항목은 빈 제출(중복 생성) 막기 — 하위 입력 또는 기존 선택이 있어야 함
+                const isSent = !!projects.find((p) => p.id === sendPopup.id)?.sent;
+                const nothing = sendText.trim() === "" && selectedPlannerIds.size === 0;
+                const disabled = sendState === "sending" || sendState === "done" || (isSent && nothing);
+                return (
+                  <button
+                    onClick={sendToPlanner}
+                    disabled={disabled}
+                    style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled && sendState !== "done" ? 0.5 : 1 }}
+                  >
+                    {sendState === "sending" ? "보내는 중…" : sendState === "done" ? "완료 ✓" : isSent ? "추가" : "보내기"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
