@@ -12,6 +12,8 @@ interface Body {
   plannerDbId: string;
   parentPageId: string;
   subTitles?: string[];
+  // 하위 항목별 제목+날짜 (지정 시 그 날짜로 하위/플래너 생성). subTitles보다 우선
+  subItems?: { title: string; start?: string | null; end?: string | null }[];
   // 기존 플래너 항목을 직접 연결 (토글 선택)
   existingPlannerIds?: string[];
   // 플래너 속성명 (기본: 범위/날짜/책/PLANNER)
@@ -141,20 +143,26 @@ export async function POST(req: NextRequest) {
       } catch { /* 동기화 속성 이름 변경 실패는 치명적이지 않음 */ }
     }
 
+    // 날짜 값 빌더 (하위별 날짜가 있으면 그걸로, 없으면 상위 날짜)
+    const mkDate = (start?: string | null, end?: string | null) =>
+      start ? { date: { start, end: end && end !== start ? end : null } } : datePropValue;
+
     // 플래너 페이지 1개 생성 헬퍼
-    const createPlannerPage = async (title: string, linkIds: string[]) => {
+    const createPlannerPage = async (title: string, linkIds: string[], dateOverride?: { date: { start: string; end: string | null } } | null) => {
+      const dv = dateOverride !== undefined ? dateOverride : datePropValue;
       const properties: Record<string, unknown> = {
         [plannerTitleProp]: { title: [{ text: { content: title } }] },
         [linkProp!]: { relation: linkIds.map((id) => ({ id })) },
       };
-      if (datePropValue && plannerDateProp) properties[plannerDateProp] = datePropValue;
+      if (dv && plannerDateProp) properties[plannerDateProp] = dv;
       if (bookIds.length > 0 && plannerBookProp) properties[plannerBookProp] = { relation: bookIds.map((id) => ({ id })) };
       const page = await notion.pages.create({ parent: { database_id: b.plannerDbId }, properties: properties as never });
       return (page as { id: string }).id;
     };
 
     // 프젝칼 네이티브 하위 항목 1개 생성 헬퍼
-    const createSubItem = async (title: string): Promise<string> => {
+    const createSubItem = async (title: string, dateOverride?: { date: { start: string; end: string | null } } | null): Promise<string> => {
+      const dv = dateOverride !== undefined ? dateOverride : datePropValue;
       const parentDbId = (parent as { parent?: { database_id?: string } }).parent?.database_id;
       const properties: Record<string, unknown> = {};
       // 제목 속성명 — body 우선, 없으면 상위에서 탐지
@@ -166,13 +174,17 @@ export async function POST(req: NextRequest) {
       }
       if (pcalTitleProp) properties[pcalTitleProp] = { title: [{ text: { content: title } }] };
       properties[parentRelProp] = { relation: [{ id: b.parentPageId }] };
-      if (datePropValue && b.dateProperty) properties[b.dateProperty] = datePropValue;
+      if (dv && b.dateProperty) properties[b.dateProperty] = dv;
       if (bookIds.length > 0) properties[bookPropSrc] = { relation: bookIds.map((id) => ({ id })) };
       const page = await notion.pages.create({ parent: { database_id: parentDbId! }, properties: properties as never });
       return (page as { id: string }).id;
     };
 
-    const titles = (b.subTitles ?? []).map((t) => t.trim()).filter(Boolean);
+    // 하위 항목 목록: subItems(제목+날짜) 우선, 없으면 subTitles
+    const subItems = (b.subItems && b.subItems.length > 0)
+      ? b.subItems.map((s) => ({ title: (s.title ?? "").trim(), dv: mkDate(s.start, s.end) })).filter((s) => s.title)
+      : (b.subTitles ?? []).map((t) => t.trim()).filter(Boolean).map((title) => ({ title, dv: datePropValue }));
+    const titles = subItems.map((s) => s.title);
     const created: { plannerId: string; subItemId?: string }[] = [];
 
     const withStep = async <T>(step: string, fn: () => Promise<T>): Promise<T> => {
@@ -202,9 +214,9 @@ export async function POST(req: NextRequest) {
       const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(parentTitle, [b.parentPageId]));
       created.push({ plannerId });
     } else {
-      for (const title of titles) {
-        const subItemId = await withStep("하위 항목 생성", () => createSubItem(title));
-        const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(title, [b.parentPageId, subItemId]));
+      for (const s of subItems) {
+        const subItemId = await withStep("하위 항목 생성", () => createSubItem(s.title, s.dv));
+        const plannerId = await withStep("플래너 페이지 생성", () => createPlannerPage(s.title, [b.parentPageId, subItemId], s.dv));
         created.push({ plannerId, subItemId });
       }
     }

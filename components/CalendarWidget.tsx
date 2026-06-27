@@ -133,9 +133,15 @@ export default function CalendarWidget({
   const [todayStr, setTodayStr] = useState<string>(() => new Date().toDateString());
   const [weekStartStr, setWeekStartStr] = useState<string>(() => formatDate(getWeekStart(new Date())));
 
-  const [projects, setProjects] = useState<ProjectSegment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const hasLoadedOnce = useRef(false);
+  // 마지막으로 불러온 항목을 캐시 → 새로고침/재로드 시 빈 화면 대신 즉시 표시 후 새 데이터로 덮어씀
+  const projCacheKey = config?.notionConfig?.databaseId ? `pcal_proj_${config.notionConfig.databaseId}` : null;
+  const cachedProjects: ProjectSegment[] | null = (() => {
+    if (!projCacheKey || configId === "preview") return null;
+    try { const s = safeStorage.getItem(projCacheKey); const a = s ? JSON.parse(s) : null; return Array.isArray(a) ? a : null; } catch { return null; }
+  })();
+  const [projects, setProjects] = useState<ProjectSegment[]>(() => cachedProjects ?? []);
+  const [loading, setLoading] = useState(() => !cachedProjects);
+  const hasLoadedOnce = useRef(!!cachedProjects);
   const [error, setError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -161,7 +167,8 @@ export default function CalendarWidget({
   const [editingTitle, setEditingTitle] = useState<{ id: string; value: string } | null>(null);
   // 플래너로 보내기 모달
   const [sendPopup, setSendPopup] = useState<{ id: string; title: string } | null>(null);
-  const [sendText, setSendText] = useState("");
+  // 하위 항목 입력 행 (제목 + 날짜). 날짜 비우면 상위 날짜 사용
+  const [sendRows, setSendRows] = useState<{ title: string; date: string }[]>([]);
   const [sendState, setSendState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [sendError, setSendError] = useState("");
   // 기존 플래너 항목 토글 선택
@@ -860,7 +867,11 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
+        const next = json.success && json.data ? assignColors(json.data, barColors) : [];
+        setProjects(next);
+        if (projCacheKey && json.success && json.data) {
+          try { safeStorage.setItem(projCacheKey, JSON.stringify(next)); } catch { /* 캐시 실패 무시 */ }
+        }
         if (json.dependsProp) setDetectedDependsProp(json.dependsProp as string);
       } catch (e) {
         console.error(e);
@@ -997,8 +1008,9 @@ export default function CalendarWidget({
     if (effectiveRowMap.has(id)) effectiveRowMap.set(id, row);
   });
 
-  // 펼친 상위 항목: 하위 항목을 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
-  // 단, 사용자가 직접 드래그한 하위는 그 위치를 존중. 전역으로 밀지 않고 겹침은 아래 해소 패스가 처리.
+  // 펼친 상위 항목: 하위 항목은 "항상" 상위 바로 아래부터 차곡차곡 패킹(겹치지 않으면 같은 줄).
+  // 하위는 줄 속성/드래그와 무관하게 상위 아래로 강제 → 절대 상위 위로 올라가지 않음.
+  const forcedChildRows = new Set<string>();
   if (expandedParents.size > 0) {
     const parents = allDisplayProjects
       .filter((p) => !p.isGCal && expandedParents.has(p.id) && (childrenByParent.get(p.id)?.length ?? 0) > 0)
@@ -1006,7 +1018,6 @@ export default function CalendarWidget({
     for (const P of parents) {
       const pRow = effectiveRowMap.get(P.id) ?? 0;
       const kids = [...(childrenByParent.get(P.id) ?? [])]
-        .filter((k) => !rowOverrides.has(k.id))
         .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
       const rowEnds: string[] = [];
       for (const c of kids) {
@@ -1014,6 +1025,7 @@ export default function CalendarWidget({
         if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
         else rowEnds[r] = c.endDate;
         effectiveRowMap.set(c.id, pRow + 1 + r);
+        forcedChildRows.add(c.id);
       }
     }
   }
@@ -1024,13 +1036,18 @@ export default function CalendarWidget({
     const occ = new Map<number, Array<{ s: string; e: string }>>();
     const conflict = (r: number, s: string, e: string) =>
       (occ.get(r) ?? []).some((o) => s <= o.e && e >= o.s);
+    // 강제 배치된 하위 항목을 먼저 고정(밀리지 않게), 이후 드래그한 항목, 나머지 순으로 배치
+    const prio = (id: string) => forcedChildRows.has(id) ? 0 : (rowOverrides.has(id) ? 1 : 2);
     const ordered = [...allDisplayProjects].sort((a, b) =>
       ((effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0)) ||
-      ((rowOverrides.has(a.id) ? 0 : 1) - (rowOverrides.has(b.id) ? 0 : 1)) ||
+      (prio(a.id) - prio(b.id)) ||
       a.startDate.localeCompare(b.startDate));
     for (const p of ordered) {
       let r = effectiveRowMap.get(p.id) ?? 0;
-      while (conflict(r, p.startDate, p.endDate)) r++;
+      // 강제 하위는 그 줄에 고정(겹치면 나머지가 비킴)
+      if (!forcedChildRows.has(p.id)) {
+        while (conflict(r, p.startDate, p.endDate)) r++;
+      }
       effectiveRowMap.set(p.id, r);
       if (!occ.has(r)) occ.set(r, []);
       occ.get(r)!.push({ s: p.startDate, e: p.endDate });
@@ -1315,7 +1332,7 @@ export default function CalendarWidget({
     if (!config || !sendPopup) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId) return;
-    const subTitles = sendText.split("\n").map((s) => s.trim()).filter(Boolean);
+    const subItems = sendRows.map((r) => ({ title: r.title.trim(), start: r.date || undefined })).filter((r) => r.title);
     setSendState("sending");
     setSendError("");
     try {
@@ -1326,7 +1343,7 @@ export default function CalendarWidget({
           apiKey: nc.plannerToken || nc.apiKey,
           plannerDbId: nc.plannerDbId,
           parentPageId: sendPopup.id,
-          subTitles,
+          subItems,
           existingPlannerIds: [...selectedPlannerIds],
           plannerTitleProp: nc.plannerTitleProp,
           plannerDateProp: nc.plannerDateProp,
@@ -1341,7 +1358,7 @@ export default function CalendarWidget({
       const d = await res.json();
       if (!res.ok || !d.success) throw new Error(d.error?.message || "보내기 실패");
       setSendState("done");
-      setTimeout(() => { setSendPopup(null); setSendText(""); setSendState("idle"); fetchProjects(); }, 700);
+      setTimeout(() => { setSendPopup(null); setSendRows([]); setSendState("idle"); fetchProjects(); }, 700);
     } catch (e) {
       console.error(e);
       setSendError(e instanceof Error ? e.message : String(e));
@@ -1351,26 +1368,32 @@ export default function CalendarWidget({
 
   // 날짜 클릭 → 그 날짜에 걸친 "아직 안 보낸" 항목 전체를 플래너로 보내기(제목 그대로)
   const [bulkSending, setBulkSending] = useState(false);
-  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 확인 팝업 사용
-  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; count: number } | null>(null);
+  // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 선택/확인 팝업 사용
+  const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; items: { id: string; title: string }[] } | null>(null);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  // 항목별 하위 제목 입력
+  const [bulkSubs, setBulkSubs] = useState<Record<string, string[]>>({});
   const bulkSendDay = (dateStr: string) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
-    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    const targets = projects.filter((p) => !p.sent && !p.parentId && p.startDate <= dateStr && dateStr <= p.endDate);
     if (targets.length === 0) return;
-    setBulkConfirm({ dateStr, count: targets.length });
+    setBulkConfirm({ dateStr, items: targets.map((p) => ({ id: p.id, title: p.title })) });
+    setBulkSelected(new Set(targets.map((p) => p.id))); // 기본 전체 선택
+    setBulkSubs({});
   };
-  const doBulkSend = async (dateStr: string) => {
+  const doBulkSend = async (ids: string[]) => {
     if (!config) return;
     const nc = config.notionConfig;
     if (!nc.plannerDbId || bulkSending) return;
-    const targets = projects.filter((p) => !p.sent && p.startDate <= dateStr && dateStr <= p.endDate);
+    const targets = projects.filter((p) => ids.includes(p.id));
     setBulkConfirm(null);
     if (targets.length === 0) return;
     setBulkSending(true);
     try {
       for (const p of targets) {
+        const subItems = (bulkSubs[p.id] ?? []).map((t) => ({ title: t.trim() })).filter((s) => s.title);
         await fetch("/api/send-to-planner", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1378,7 +1401,7 @@ export default function CalendarWidget({
             apiKey: nc.plannerToken || nc.apiKey,
             plannerDbId: nc.plannerDbId,
             parentPageId: p.id,
-            subTitles: [],
+            subItems,
             plannerTitleProp: nc.plannerTitleProp,
             plannerDateProp: nc.plannerDateProp,
             plannerBookProp: nc.plannerBookProp,
@@ -2296,7 +2319,8 @@ export default function CalendarWidget({
                             {/* 막대 위에 떠 있는 작은 버튼들: 강조 토글 + 플래너 보내기 (Notion 시작 세그먼트, 호버) */}
                             {isHovered && seg.isStart && !seg.isGCal && config && configId !== "preview" && !isDragging && (() => {
                               const showHighlight = !!config.notionConfig.highlightProperty;
-                              const showSend = !!config.notionConfig.plannerDbId && !seg.sent;
+                              // 이미 보낸 항목에도 표시 → 하위 항목/연결 추가 가능
+                              const showSend = !!config.notionConfig.plannerDbId;
                               if (!showHighlight && !showSend) return null;
                               const iconBtn: React.CSSProperties = {
                                 padding: 0, border: "none", background: "transparent", cursor: "pointer",
@@ -2323,7 +2347,7 @@ export default function CalendarWidget({
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         setSendPopup({ id: seg.id, title: seg.title });
-                                        setSendText(""); setSendState("idle"); setSendError("");
+                                        setSendRows([{ title: "", date: seg.startDate }]); setSendState("idle"); setSendError("");
                                         setSelectedPlannerIds(new Set()); setPlannerItems([]);
                                         loadPlannerItems();
                                       }}
@@ -2526,17 +2550,53 @@ export default function CalendarWidget({
           style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => { if (!bulkSending) setBulkConfirm(null); }}
         >
-          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 280, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 300, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 6 }}>📤 날짜 일괄 보내기</div>
-            <div style={{ fontSize: 12, color: "#666", marginBottom: 14 }}>
-              {bulkConfirm.dateStr}의 아직 안 보낸 항목 <b>{bulkConfirm.count}개</b>를 플래너로 보낼까요?
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
+              {bulkConfirm.dateStr} — 보낼 항목을 선택하세요 ({bulkSelected.size}/{bulkConfirm.items.length})
+            </div>
+            <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
+              {bulkConfirm.items.map((it) => {
+                const on = bulkSelected.has(it.id);
+                const subs = bulkSubs[it.id] ?? [];
+                return (
+                  <div key={it.id} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                    <div
+                      onClick={() => setBulkSelected((prev) => { const n = new Set(prev); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, color: "#444", background: on ? hexToRgba(primaryColor, 0.08) : "transparent" }}>
+                      <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "제목 없음"}</span>
+                    </div>
+                    {on && (
+                      <div style={{ padding: "0 10px 6px 32px" }}>
+                        {subs.map((s, i) => (
+                          <div key={i} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4 }}>
+                            <input
+                              value={s}
+                              onChange={(e) => setBulkSubs((prev) => ({ ...prev, [it.id]: (prev[it.id] ?? []).map((x, j) => j === i ? e.target.value : x) }))}
+                              placeholder="하위 제목"
+                              style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: "1px solid #e5e5e7", borderRadius: 6, outline: "none" }}
+                            />
+                            <button onClick={() => setBulkSubs((prev) => ({ ...prev, [it.id]: (prev[it.id] ?? []).filter((_, j) => j !== i) }))}
+                              style={{ border: "none", background: "none", color: "#bbb", cursor: "pointer", fontSize: 14 }}>×</button>
+                          </div>
+                        ))}
+                        <button onClick={() => setBulkSubs((prev) => ({ ...prev, [it.id]: [...(prev[it.id] ?? []), ""] }))}
+                          style={{ fontSize: 11, color: primaryColor, background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: "2px 0" }}>+ 하위</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setBulkConfirm(null)} disabled={bulkSending}
                 style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}>취소</button>
-              <button onClick={() => doBulkSend(bulkConfirm.dateStr)} disabled={bulkSending}
-                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: bulkSending ? 0.7 : 1 }}>
-                {bulkSending ? "보내는 중…" : "보내기"}</button>
+              <button onClick={() => doBulkSend([...bulkSelected])} disabled={bulkSending || bulkSelected.size === 0}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: (bulkSending || bulkSelected.size === 0) ? 0.5 : 1 }}>
+                {bulkSending ? "보내는 중…" : `${bulkSelected.size}개 보내기`}</button>
             </div>
           </div>
         </div>
@@ -2546,31 +2606,38 @@ export default function CalendarWidget({
       {sendPopup && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => { if (sendState !== "sending") { setSendPopup(null); setSendText(""); setSendState("idle"); } }}
+          onClick={() => { if (sendState !== "sending") { setSendPopup(null); setSendRows([]); setSendState("idle"); } }}
         >
           <div
             style={{ background: "#fff", borderRadius: 14, padding: 20, width: 320, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>📤 플래너로 보내기</div>
+            {(() => { const s = projects.find((p) => p.id === sendPopup.id)?.sent; return (
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#333", marginBottom: 4 }}>{s ? "📤 하위 항목 추가" : "📤 플래너로 보내기"}</div>
+            ); })()}
             <div style={{ fontSize: 12, color: "#888", marginBottom: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {sendPopup.title || "제목 없음"}
             </div>
             <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 6 }}>
-              하위 항목 (한 줄에 하나씩, 비우면 제목 그대로 1개)
+              하위 항목{projects.find((p) => p.id === sendPopup.id)?.sent ? "" : " (비우면 제목 그대로 1개)"} <span style={{ color: "#bbb" }}>· 날짜는 보낸 뒤 막대를 옮기면 플래너에 반영됩니다</span>
             </label>
-            <textarea
-              value={sendText}
-              onChange={(e) => setSendText(e.target.value)}
-              placeholder={"예) 1장 읽기\n2장 읽기"}
-              rows={5}
-              autoFocus
-              style={{
-                width: "100%", boxSizing: "border-box", padding: 10, fontSize: 13,
-                border: "1px solid #e5e5e7", borderRadius: 8, outline: "none", resize: "vertical",
-                fontFamily: "inherit", marginBottom: 12,
-              }}
-            />
+            <div style={{ marginBottom: 8 }}>
+              {sendRows.map((row, i) => (
+                <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                  <input
+                    value={row.title}
+                    onChange={(e) => setSendRows((rs) => rs.map((r, j) => j === i ? { ...r, title: e.target.value } : r))}
+                    placeholder="하위 제목"
+                    autoFocus={i === 0}
+                    style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: "1px solid #e5e5e7", borderRadius: 8, outline: "none" }}
+                  />
+                  <button onClick={() => setSendRows((rs) => rs.length > 1 ? rs.filter((_, j) => j !== i) : rs)}
+                    style={{ border: "none", background: "none", color: "#bbb", cursor: "pointer", fontSize: 15, padding: "0 2px" }}>×</button>
+                </div>
+              ))}
+              <button onClick={() => setSendRows((rs) => [...rs, { title: "", date: "" }])}
+                style={{ fontSize: 12, color: primaryColor, background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: "2px 0" }}>+ 하위 추가</button>
+            </div>
             {/* 기존 플래너 항목 토글 선택 — 보내는 항목의 날짜에 해당하는 것만 */}
             {(() => {
               const tp = projects.find((p) => p.id === sendPopup.id);
@@ -2634,19 +2701,27 @@ export default function CalendarWidget({
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
-                onClick={() => { setSendPopup(null); setSendText(""); setSendState("idle"); }}
+                onClick={() => { setSendPopup(null); setSendRows([]); setSendState("idle"); }}
                 disabled={sendState === "sending"}
                 style={{ padding: "8px 14px", fontSize: 13, border: "none", borderRadius: 8, background: "#eee", color: "#555", cursor: "pointer" }}
               >
                 취소
               </button>
-              <button
-                onClick={sendToPlanner}
-                disabled={sendState === "sending" || sendState === "done"}
-                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: "pointer", opacity: sendState === "sending" ? 0.7 : 1 }}
-              >
-                {sendState === "sending" ? "보내는 중…" : sendState === "done" ? "완료 ✓" : "보내기"}
-              </button>
+              {(() => {
+                // 이미 보낸 항목은 빈 제출(중복 생성) 막기 — 하위 입력 또는 기존 선택이 있어야 함
+                const isSent = !!projects.find((p) => p.id === sendPopup.id)?.sent;
+                const nothing = sendRows.every((r) => r.title.trim() === "") && selectedPlannerIds.size === 0;
+                const disabled = sendState === "sending" || sendState === "done" || (isSent && nothing);
+                return (
+                  <button
+                    onClick={sendToPlanner}
+                    disabled={disabled}
+                    style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 8, background: primaryColor, color: "#fff", fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled && sendState !== "done" ? 0.5 : 1 }}
+                  >
+                    {sendState === "sending" ? "보내는 중…" : sendState === "done" ? "완료 ✓" : isSent ? "추가" : "보내기"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
