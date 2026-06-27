@@ -1361,6 +1361,8 @@ export default function CalendarWidget({
   // window.confirm 은 Notion 임베드(iframe)에서 막히므로 자체 선택/확인 팝업 사용
   const [bulkConfirm, setBulkConfirm] = useState<{ dateStr: string; items: { id: string; title: string }[] } | null>(null);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  // 항목별 하위 제목 입력
+  const [bulkSubs, setBulkSubs] = useState<Record<string, string[]>>({});
   const bulkSendDay = (dateStr: string) => {
     if (!config) return;
     const nc = config.notionConfig;
@@ -1369,6 +1371,7 @@ export default function CalendarWidget({
     if (targets.length === 0) return;
     setBulkConfirm({ dateStr, items: targets.map((p) => ({ id: p.id, title: p.title })) });
     setBulkSelected(new Set(targets.map((p) => p.id))); // 기본 전체 선택
+    setBulkSubs({});
   };
   const doBulkSend = async (ids: string[]) => {
     if (!config) return;
@@ -1380,6 +1383,7 @@ export default function CalendarWidget({
     setBulkSending(true);
     try {
       for (const p of targets) {
+        const subItems = (bulkSubs[p.id] ?? []).map((t) => ({ title: t.trim() })).filter((s) => s.title);
         await fetch("/api/send-to-planner", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1387,7 +1391,7 @@ export default function CalendarWidget({
             apiKey: nc.plannerToken || nc.apiKey,
             plannerDbId: nc.plannerDbId,
             parentPageId: p.id,
-            subTitles: [],
+            subItems,
             plannerTitleProp: nc.plannerTitleProp,
             plannerDateProp: nc.plannerDateProp,
             plannerBookProp: nc.plannerBookProp,
@@ -2541,17 +2545,38 @@ export default function CalendarWidget({
             <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
               {bulkConfirm.dateStr} — 보낼 항목을 선택하세요 ({bulkSelected.size}/{bulkConfirm.items.length})
             </div>
-            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
+            <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
               {bulkConfirm.items.map((it) => {
                 const on = bulkSelected.has(it.id);
+                const subs = bulkSubs[it.id] ?? [];
                 return (
-                  <div key={it.id}
-                    onClick={() => setBulkSelected((prev) => { const n = new Set(prev); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, color: "#444", background: on ? hexToRgba(primaryColor, 0.08) : "transparent" }}>
-                    <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                  <div key={it.id} style={{ borderBottom: "1px solid #f3f3f3" }}>
+                    <div
+                      onClick={() => setBulkSelected((prev) => { const n = new Set(prev); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, color: "#444", background: on ? hexToRgba(primaryColor, 0.08) : "transparent" }}>
+                      <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? primaryColor : "#ccc"}`, background: on ? primaryColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {on && <span style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "제목 없음"}</span>
                     </div>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "제목 없음"}</span>
+                    {on && (
+                      <div style={{ padding: "0 10px 6px 32px" }}>
+                        {subs.map((s, i) => (
+                          <div key={i} style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4 }}>
+                            <input
+                              value={s}
+                              onChange={(e) => setBulkSubs((prev) => ({ ...prev, [it.id]: (prev[it.id] ?? []).map((x, j) => j === i ? e.target.value : x) }))}
+                              placeholder="하위 제목"
+                              style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: "1px solid #e5e5e7", borderRadius: 6, outline: "none" }}
+                            />
+                            <button onClick={() => setBulkSubs((prev) => ({ ...prev, [it.id]: (prev[it.id] ?? []).filter((_, j) => j !== i) }))}
+                              style={{ border: "none", background: "none", color: "#bbb", cursor: "pointer", fontSize: 14 }}>×</button>
+                          </div>
+                        ))}
+                        <button onClick={() => setBulkSubs((prev) => ({ ...prev, [it.id]: [...(prev[it.id] ?? []), ""] }))}
+                          style={{ fontSize: 11, color: primaryColor, background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: "2px 0" }}>+ 하위</button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
