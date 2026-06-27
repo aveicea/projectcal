@@ -133,9 +133,15 @@ export default function CalendarWidget({
   const [todayStr, setTodayStr] = useState<string>(() => new Date().toDateString());
   const [weekStartStr, setWeekStartStr] = useState<string>(() => formatDate(getWeekStart(new Date())));
 
-  const [projects, setProjects] = useState<ProjectSegment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const hasLoadedOnce = useRef(false);
+  // 마지막으로 불러온 항목을 캐시 → 새로고침/재로드 시 빈 화면 대신 즉시 표시 후 새 데이터로 덮어씀
+  const projCacheKey = config?.notionConfig?.databaseId ? `pcal_proj_${config.notionConfig.databaseId}` : null;
+  const cachedProjects: ProjectSegment[] | null = (() => {
+    if (!projCacheKey || configId === "preview") return null;
+    try { const s = safeStorage.getItem(projCacheKey); const a = s ? JSON.parse(s) : null; return Array.isArray(a) ? a : null; } catch { return null; }
+  })();
+  const [projects, setProjects] = useState<ProjectSegment[]>(() => cachedProjects ?? []);
+  const [loading, setLoading] = useState(() => !cachedProjects);
+  const hasLoadedOnce = useRef(!!cachedProjects);
   const [error, setError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -861,7 +867,11 @@ export default function CalendarWidget({
         });
         if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json();
-        setProjects(json.success && json.data ? assignColors(json.data, barColors) : []);
+        const next = json.success && json.data ? assignColors(json.data, barColors) : [];
+        setProjects(next);
+        if (projCacheKey && json.success && json.data) {
+          try { safeStorage.setItem(projCacheKey, JSON.stringify(next)); } catch { /* 캐시 실패 무시 */ }
+        }
         if (json.dependsProp) setDetectedDependsProp(json.dependsProp as string);
       } catch (e) {
         console.error(e);
