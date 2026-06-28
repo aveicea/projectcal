@@ -144,7 +144,9 @@ export default function WidgetClient({ cfg }: { cfg: string }) {
           margin: 0 !important; padding: 0 !important;
         }
         body {
-          padding-top: 20px !important;
+          /* 좌우·아래 여백을 둬서 위젯 외곽선/그림자가 임베드(iframe) 경계에서 잘리지 않게 */
+          padding: 20px 16px 16px !important;
+          box-sizing: border-box;
           display: flex; justify-content: center;
           align-items: flex-start; min-height: 100vh;
         }
