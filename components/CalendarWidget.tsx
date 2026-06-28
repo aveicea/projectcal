@@ -1017,15 +1017,31 @@ export default function CalendarWidget({
       .sort((a, b) => (effectiveRowMap.get(a.id) ?? 0) - (effectiveRowMap.get(b.id) ?? 0));
     for (const P of parents) {
       const pRow = effectiveRowMap.get(P.id) ?? 0;
-      const kids = [...(childrenByParent.get(P.id) ?? [])]
-        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
-      const rowEnds: string[] = [];
-      for (const c of kids) {
-        let r = rowEnds.findIndex((end) => c.startDate > end);
-        if (r === -1) { r = rowEnds.length; rowEnds.push(c.endDate); }
-        else rowEnds[r] = c.endDate;
-        effectiveRowMap.set(c.id, pRow + 1 + r);
+      const kids = childrenByParent.get(P.id) ?? [];
+      // 드래그로 줄을 직접 지정한 하위는 그 줄을 존중(상위 바로 아래로 clamp),
+      // 나머지는 이미 놓인 하위와 시간이 겹치지 않는 가장 위 줄에 자동 패킹.
+      const occ = new Map<number, Array<{ s: string; e: string }>>();
+      const fits = (r: number, c: Project) =>
+        !(occ.get(r) ?? []).some((o) => c.startDate <= o.e && c.endDate >= o.s);
+      const place = (c: Project, r: number) => {
+        effectiveRowMap.set(c.id, r);
         forcedChildRows.add(c.id);
+        if (!occ.has(r)) occ.set(r, []);
+        occ.get(r)!.push({ s: c.startDate, e: c.endDate });
+      };
+      const dragged = kids.filter((c) => rowOverrides.has(c.id))
+        .sort((a, b) => (rowOverrides.get(a.id) ?? 0) - (rowOverrides.get(b.id) ?? 0));
+      const auto = kids.filter((c) => !rowOverrides.has(c.id))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+      for (const c of dragged) {
+        let r = Math.max(rowOverrides.get(c.id) ?? pRow + 1, pRow + 1);
+        while (!fits(r, c)) r++;
+        place(c, r);
+      }
+      for (const c of auto) {
+        let r = pRow + 1;
+        while (!fits(r, c)) r++;
+        place(c, r);
       }
     }
   }
