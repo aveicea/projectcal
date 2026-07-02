@@ -13,7 +13,7 @@ const CalendarWidget = dynamic(() => import("@/components/CalendarWidget"), {
 });
 
 const THEMES = [
-  { name: "파스텔🌸", colors: { background: "#FFFCF9", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
+  { name: "파스텔🌸", colors: { background: "#FFFFFF", primary: "#B5E3F0", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
   { name: "핑크",    colors: { background: "#FFF5F8", primary: "#F19CB6", barColors: ["#FFB3BA","#FFDBE7","#FFD1DC","#F8C8DC","#FF9EC1","#FFC4D6","#FF85A2","#FFE4ED"] } },
   { name: "블랙",    colors: { background: "#1E1E1E", primary: "#4A4A4A", barColors: ["#6B7280","#9CA3AF","#D1D5DB","#E5E7EB","#F3F4F6","#8B5CF6","#EC4899","#F97316"] } },
   { name: "화이트",  colors: { background: "#FFFFFF", primary: "#2D2D2D", barColors: ["#FFB3BA","#E2D1F0","#C6EBC5","#FFDFBA","#BAE1FF","#FFD1DC","#B5EAD7","#FFDAC1"] } },
@@ -327,7 +327,7 @@ function OnboardingPageInner() {
     parentRelProp: "상위 항목",
     bookProperty: "책",
     primaryColor: "#B5E3F0",
-    backgroundColor: "#FFFCF9",
+    backgroundColor: "#FFFFFF",
     backgroundOpacity: 100,
     fontFamily: "Pretendard",
     barColors: [...DEFAULT_BAR_COLORS],
