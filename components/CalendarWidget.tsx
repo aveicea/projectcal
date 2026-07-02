@@ -183,6 +183,10 @@ export default function CalendarWidget({
   const bodyRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
+  // 주간 뷰 무한 스크롤: 스크롤로 중앙에 온 주를 메인으로 재지정하면서 3주 버퍼를 이동시킨다.
+  // 콘텐츠가 한 주 폭만큼 밀린 것을 scrollLeft 보정으로 상쇄해 시각적 점프 없이 이어지게 한다.
+  const weekShiftPendingRef = useRef(0);     // 재지정 후 적용할 scrollLeft 보정량(px)
+  const isWeekShiftingRef = useRef(false);   // 보정 중 재진입(스크롤 이벤트) 방지
 
   // 그룹 팝업 세로 위치: 위젯 본문(헤더 아래 ~ 위젯 맨 밑) 영역 안에서 항목 중심으로 중앙 정렬,
   // 위(헤더)나 아래(푸터/맨밑) 공간이 부족하면 그 경계로 밀어 넣는다.
@@ -905,6 +909,38 @@ export default function CalendarWidget({
       return formatDate(d);
     });
   };
+
+  // ── 주간 뷰 무한 스크롤 ──
+  // 뷰포트 중앙에 가장 가까운 주가 메인이 되도록 3주 버퍼(이전·현재·다음)를 이동시킨다.
+  // 버퍼를 몇 주 이동시켰든 같은 폭만큼 scrollLeft를 보정하므로 화면상 위치는 그대로 유지된다.
+  const WEEK_W = 7 * WEEK_DAY_WIDTH;   // 한 주 폭
+  const INNER_PAD = 12;                // 본문 내부 좌측 패딩
+  const handleWeekScroll = () => {
+    if (!weekView || !bodyRef.current || isWeekShiftingRef.current) return;
+    const el = bodyRef.current;
+    const viewportCenter = el.scrollLeft + el.clientWidth / 2;
+    // 0 = 이전 주, 1 = 현재(메인) 주, 2 = 다음 주
+    const idx = Math.floor((viewportCenter - INNER_PAD) / WEEK_W);
+    const shift = idx - 1;             // 메인에서 몇 주 벗어났는지(음수=이전)
+    if (shift === 0) return;
+    isWeekShiftingRef.current = true;
+    weekShiftPendingRef.current = -shift * WEEK_W;  // 콘텐츠 이동을 상쇄할 보정량
+    setWeekStartStr((prev) => {
+      if (!prev) return prev;
+      const d = new Date(prev + "T00:00:00");
+      d.setDate(d.getDate() + shift * 7);
+      return formatDate(d);
+    });
+  };
+
+  // 주 재지정 후 scrollLeft 보정을 페인트 전에 동기 적용해 점프를 없앤다.
+  useLayoutEffect(() => {
+    if (weekShiftPendingRef.current !== 0 && bodyRef.current) {
+      bodyRef.current.scrollLeft += weekShiftPendingRef.current;
+      weekShiftPendingRef.current = 0;
+    }
+    isWeekShiftingRef.current = false;
+  }, [weekStartStr]);
 
   const scrollToToday = () => {
     if (!bodyRef.current) return;
@@ -1888,6 +1924,7 @@ export default function CalendarWidget({
           <div
             ref={bodyRef}
             onWheel={(e) => { if (bodyRef.current) bodyRef.current.scrollLeft += e.deltaY; }}
+            onScroll={handleWeekScroll}
             style={{
               padding: "10px 0 18px", overflowX: "auto", overflowY: "hidden",
               display: "flex", background: bgColor,
