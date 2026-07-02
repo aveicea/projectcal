@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
-import { ChevronLeft, ChevronRight, Link, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Send, Settings } from "lucide-react";
 import {
   Project,
   ProjectSegment,
@@ -430,7 +430,8 @@ export default function CalendarWidget({
   const weekView = theme?.weekView ?? false;
 
   const bgColor = rawBg.startsWith("rgba") ? rawBg : hexToRgbaBackground(rawBg, backgroundOpacity);
-  const headerBg = lightenColor(primaryColor, 0.85);
+  const headerBg = darkMode ? "#2a2a2a" : "#f5f5f5";
+  const borderColor = darkMode ? "#3a3a3a" : "#e5e5e5";
   const font = getFontFamily(fontFamily);
 
   const year = centerYear ?? new Date().getFullYear();
@@ -1564,9 +1565,8 @@ export default function CalendarWidget({
     return (
       <div style={{
         fontFamily: font, background: bgColor,
-        border: darkMode ? "none" : `1px solid ${primaryColor}`,
-        outline: darkMode ? "none" : `2px solid ${lightenColor(primaryColor, 0.85)}`,
-        borderRadius: 10, overflow: "hidden",
+        border: `1px solid ${borderColor}`,
+        borderRadius: 12, overflow: "hidden",
         padding: "20px 40px", fontSize: 11, color: "#aaa",
         minWidth: 200,
       }}>
@@ -1580,11 +1580,8 @@ export default function CalendarWidget({
   const weekLabel = weekView && weekDays.length > 0 ? (() => {
     const s = weekDays[0].dateObj;
     const e = weekDays[6].dateObj;
-    const sm = s.toLocaleDateString("en-US", { month: "short" });
-    const em = e.toLocaleDateString("en-US", { month: "short" });
-    return s.getMonth() === e.getMonth()
-      ? `${sm} ${s.getDate()} – ${e.getDate()}, ${s.getFullYear()}`
-      : `${sm} ${s.getDate()} – ${em} ${e.getDate()}, ${e.getFullYear()}`;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(s.getMonth() + 1)}/${pad(s.getDate())}~${pad(e.getMonth() + 1)}/${pad(e.getDate())}`;
   })() : "";
 
   const headerLabel = weekView ? weekLabel : centerMonthLabel;
@@ -1607,35 +1604,34 @@ export default function CalendarWidget({
 
       <div ref={widgetRef} style={{
         fontFamily: font, background: bgColor,
-        border: darkMode ? "none" : `1px solid ${primaryColor}`,
-        outline: darkMode ? "none" : `2px solid ${headerBg}`,
-        boxShadow: darkMode ? "none" : `2px 2px 0px ${primaryColor}4D, 4px 4px 12px ${primaryColor}26`,
-        borderRadius: 10, overflow: "hidden", userSelect: "none",
+        border: `1px solid ${borderColor}`,
+        boxShadow: darkMode ? "none" : "0 1px 3px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.03)",
+        borderRadius: 12, overflow: "hidden", userSelect: "none",
         width: "fit-content", maxWidth: "100%",
         display: "flex", flexDirection: "column", position: "relative",
       }}>
-        {/* Header */}
+        {/* Header — neutral gray bar, date range centered regardless of side content width */}
         <div style={{
-          height: 22, background: headerBg, borderBottom: `1px solid ${primaryColor}`,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "0 12px", fontSize: 11, color: primaryColor,
-          fontWeight: "bold", letterSpacing: 0.2, flexShrink: 0,
+          height: 30, background: headerBg, borderBottom: `1px solid ${borderColor}`,
+          display: "flex", alignItems: "center", justifyContent: "flex-end",
+          padding: "0 10px", fontSize: 11, color: darkMode ? "#aaa" : "#888",
+          fontWeight: 600, letterSpacing: 0.2, flexShrink: 0, position: "relative",
         }}>
-          <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span onClick={goToToday} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <Link size={12} strokeWidth={2.5} />
-              {headerLabel} Timeline
+          <span style={{
+            position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+            display: "flex", gap: 4, alignItems: "center", whiteSpace: "nowrap",
+          }}>
+            <button onClick={() => weekView ? navigateWeek(-1) : navigateMonth(-1)}
+              aria-label="Previous" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: "inherit", display: "flex", alignItems: "center", background: "none", border: "none" }}>
+              <ChevronLeft size={13} />
+            </button>
+            <span onClick={goToToday} style={{ cursor: "pointer", fontVariantNumeric: "tabular-nums" }}>
+              {headerLabel}
             </span>
-            <span style={{ display: "flex", gap: 2, alignItems: "center", marginLeft: 2 }}>
-              <button onClick={() => weekView ? navigateWeek(-1) : navigateMonth(-1)}
-                aria-label="Previous" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
-                <ChevronLeft size={14} />
-              </button>
-              <button onClick={() => weekView ? navigateWeek(1) : navigateMonth(1)}
-                aria-label="Next" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: primaryColor, display: "flex", alignItems: "center", background: "none", border: "none" }}>
-                <ChevronRight size={14} />
-              </button>
-            </span>
+            <button onClick={() => weekView ? navigateWeek(1) : navigateMonth(1)}
+              aria-label="Next" style={{ cursor: "pointer", padding: 2, borderRadius: 4, color: "inherit", display: "flex", alignItems: "center", background: "none", border: "none" }}>
+              <ChevronRight size={13} />
+            </button>
           </span>
 
           <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1654,7 +1650,7 @@ export default function CalendarWidget({
                   fontSize: 8,
                   fontWeight: 700,
                   letterSpacing: 0.3,
-                  color: primaryColor,
+                  color: "inherit",
                   background: "transparent",
                   border: "none",
                   display: "flex",
@@ -1673,13 +1669,15 @@ export default function CalendarWidget({
             {widgetConfigStr ? (
               <a
                 href={`/setup?from=${widgetConfigStr}`}
-                title="설정 수정"
-                style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7, textDecoration: "none", cursor: "pointer" }}
+                title="설정"
+                style={{ color: "inherit", opacity: 0.85, display: "flex", alignItems: "center", cursor: "pointer" }}
               >
-                PROJECT CAL
+                <Settings size={13} strokeWidth={2} />
               </a>
             ) : (
-              <span style={{ fontSize: 6, color: primaryColor, letterSpacing: 1, opacity: 0.7 }}>PROJECT CAL</span>
+              <span style={{ color: "inherit", opacity: 0.85, display: "flex", alignItems: "center" }}>
+                <Settings size={13} strokeWidth={2} />
+              </span>
             )}
           </span>
         </div>
